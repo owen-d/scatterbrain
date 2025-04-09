@@ -1,0 +1,19 @@
+[package]
+name = "scatterbrain"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+leptos = { workspace = true }
+serde = { workspace = true, features = ["derive"] }
+penpen-tea = { path = "../penpen-tea" }
+
+# The library portion of the crate
+[lib]
+name = "scatterbrain"
+path = "src/lib.rs"
+
+# The binary portion of the crate
+[[bin]]
+name = "scatterbrain"
+path = "src/bin/main.rs"
