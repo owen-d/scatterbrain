@@ -2,7 +2,7 @@
 //!
 //! This library provides functionality for the scatterbrain tool.
 
-use std::sync::{Arc, Mutex, RwLock};
+use std::sync::{Arc, Mutex};
 
 use serde::{Deserialize, Serialize};
 
@@ -281,7 +281,7 @@ mod tests {
         // Create a plan with default levels
         let plan = Plan::new(DEFAULT_LEVELS.to_vec());
         let mut context = Context::new(plan);
-        assert_eq!(context.get_current_index(), &vec![]);
+        assert_eq!(context.get_current_index(), &Vec::<usize>::new());
         // Add a task at the root level
         let task1_index = context.add_task("Task 1".to_string());
         assert_eq!(task1_index, vec![0]);
@@ -450,10 +450,12 @@ mod tests {
     }
 }
 
+#[derive(Clone)]
 pub struct Core {
     inner: Arc<Mutex<Context>>,
 }
 
+#[derive(Serialize)]
 pub struct Current {
     index: Index,
     level: Level,
@@ -501,5 +503,166 @@ impl Core {
     pub fn move_to(&self, index: Index) -> bool {
         let mut context = self.inner.lock().unwrap();
         context.move_to(index.clone())
+    }
+}
+
+// API Server module
+pub mod api {
+    use std::net::SocketAddr;
+
+    use axum::{
+        extract::State,
+        http::StatusCode,
+        response::IntoResponse,
+        routing::{get, post},
+        Json, Router,
+    };
+    use serde::{Deserialize, Serialize};
+    use tokio::net::TcpListener;
+    use tower_http::cors::{Any, CorsLayer};
+
+    use super::{Core, Index, Plan};
+
+    /// Request to add a new task
+    #[derive(Deserialize)]
+    pub struct AddTaskRequest {
+        description: String,
+    }
+
+    /// Request to move to a specific task
+    #[derive(Deserialize)]
+    pub struct MoveToRequest {
+        index: Index,
+    }
+
+    /// Server configuration
+    #[derive(Clone, Debug)]
+    pub struct ServerConfig {
+        pub address: SocketAddr,
+    }
+
+    impl Default for ServerConfig {
+        fn default() -> Self {
+            Self {
+                address: ([127, 0, 0, 1], 3000).into(),
+            }
+        }
+    }
+
+    /// API responses
+    #[derive(Serialize)]
+    pub struct ApiResponse<T: Serialize> {
+        success: bool,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        data: Option<T>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        error: Option<String>,
+    }
+
+    impl<T: Serialize> ApiResponse<T> {
+        pub fn success(data: T) -> Self {
+            Self {
+                success: true,
+                data: Some(data),
+                error: None,
+            }
+        }
+
+        pub fn error(message: String) -> Self {
+            Self {
+                success: false,
+                data: None,
+                error: Some(message),
+            }
+        }
+    }
+
+    /// Starts the API server
+    pub async fn serve(core: Core, config: ServerConfig) -> Result<(), Box<dyn std::error::Error>> {
+        // Initialize tracing
+        tracing_subscriber::fmt::init();
+
+        // CORS configuration
+        let cors = CorsLayer::new()
+            .allow_origin(Any)
+            .allow_methods(Any)
+            .allow_headers(Any);
+
+        // Build application with routes
+        let app = Router::new()
+            .route("/api/plan", get(get_plan))
+            .route("/api/current", get(get_current))
+            .route("/api/task", post(add_task))
+            .route("/api/task/complete", post(complete_task))
+            .route("/api/move", post(move_to))
+            .layer(cors)
+            .with_state(core);
+
+        // Start server
+        tracing::info!("Starting server on {}", config.address);
+        let listener = TcpListener::bind(config.address).await?;
+        axum::serve(listener, app).await?;
+
+        Ok(())
+    }
+
+    // Handler implementations
+    async fn get_plan(State(core): State<Core>) -> Json<ApiResponse<Plan>> {
+        let plan = core.get_plan();
+        Json(ApiResponse::success(plan))
+    }
+
+    async fn get_current(State(core): State<Core>) -> impl IntoResponse {
+        match core.current() {
+            Some(current) => Json(ApiResponse::success(current)).into_response(),
+            None => (
+                StatusCode::NOT_FOUND,
+                Json(ApiResponse::<()>::error(
+                    "Current task not found".to_string(),
+                )),
+            )
+                .into_response(),
+        }
+    }
+
+    async fn add_task(
+        State(core): State<Core>,
+        Json(payload): Json<AddTaskRequest>,
+    ) -> Json<ApiResponse<Index>> {
+        let index = core.add_task(payload.description);
+        Json(ApiResponse::success(index))
+    }
+
+    async fn complete_task(State(core): State<Core>) -> impl IntoResponse {
+        let success = core.complete_task();
+        if success {
+            StatusCode::OK.into_response()
+        } else {
+            (
+                StatusCode::BAD_REQUEST,
+                Json(ApiResponse::<()>::error(
+                    "Failed to complete current task".to_string(),
+                )),
+            )
+                .into_response()
+        }
+    }
+
+    async fn move_to(
+        State(core): State<Core>,
+        Json(payload): Json<MoveToRequest>,
+    ) -> impl IntoResponse {
+        let success = core.move_to(payload.index);
+        if success {
+            StatusCode::OK.into_response()
+        } else {
+            (
+                StatusCode::BAD_REQUEST,
+                Json(ApiResponse::<()>::error(
+                    "Failed to move to requested task".to_string(),
+                )),
+            )
+                .into_response()
+        }
     }
 }
