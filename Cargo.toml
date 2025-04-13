@@ -7,6 +7,7 @@ edition = "2021"
 leptos = { workspace = true }
 serde = { workspace = true, features = ["derive"] }
 penpen-tea = { path = "../penpen-tea" }
+serde_json.workspace = true
 
 # The library portion of the crate
 [lib]

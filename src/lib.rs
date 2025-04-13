@@ -2,8 +2,12 @@
 //!
 //! This library provides functionality for the scatterbrain tool.
 
+use std::sync::{Arc, Mutex, RwLock};
+
+use serde::{Deserialize, Serialize};
+
 /// Represents an abstraction level for the LLM to work through
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, Serialize)]
 pub struct Level {
     pub description: &'static str,
     pub questions: &'static [&'static str],
@@ -46,7 +50,7 @@ pub const IMPLEMENTATION: Level = Level {
 pub const DEFAULT_LEVELS: &[Level] = &[PLAN, ISOLATION, ORDERING, IMPLEMENTATION];
 
 /// Represents a task in the LLM's work
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Task {
     pub description: String,
     pub completed: bool,
@@ -79,7 +83,7 @@ impl Task {
     }
 }
 
-#[derive(Clone)]
+#[derive(Clone, Serialize)]
 pub struct Plan {
     root: Task,
     levels: Vec<Level>,
@@ -443,5 +447,59 @@ mod tests {
         context.set_current_level(0);
         assert_eq!(context.get_current_level(), 0);
         assert!(context.get_current_index().is_empty());
+    }
+}
+
+pub struct Core {
+    inner: Arc<Mutex<Context>>,
+}
+
+pub struct Current {
+    index: Index,
+    level: Level,
+    task: Task,
+    history: Vec<String>,
+}
+
+impl Core {
+    pub fn new(context: Context) -> Self {
+        Self {
+            inner: Arc::new(Mutex::new(context)),
+        }
+    }
+
+    pub fn get_plan(&self) -> Plan {
+        self.inner.lock().unwrap().get_plan().clone()
+    }
+
+    pub fn current(&self) -> Option<Current> {
+        let context = self.inner.lock().unwrap();
+        let index = context.get_current_index();
+        if let Some((level, task, history)) = context.plan.get_with_history(index.clone()) {
+            Some(Current {
+                index: index.clone(),
+                level,
+                task,
+                history,
+            })
+        } else {
+            None
+        }
+    }
+
+    pub fn add_task(&self, description: String) -> Index {
+        let mut context = self.inner.lock().unwrap();
+        context.add_task(description)
+    }
+
+    pub fn complete_task(&self) -> bool {
+        let mut context = self.inner.lock().unwrap();
+        let index = context.get_current_index().clone();
+        context.complete_task(index.clone())
+    }
+
+    pub fn move_to(&self, index: Index) -> bool {
+        let mut context = self.inner.lock().unwrap();
+        context.move_to(index.clone())
     }
 }
