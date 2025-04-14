@@ -85,8 +85,8 @@ impl Task {
 
 #[derive(Clone, Serialize)]
 pub struct Plan {
-    root: Task,
-    levels: Vec<Level>,
+    pub root: Task,
+    pub levels: Vec<Level>,
 }
 
 impl Plan {
@@ -120,6 +120,15 @@ impl Plan {
             .get(index.len() - 1)
             .cloned()
             .map(|level| (level, current.clone(), history))
+    }
+}
+
+impl From<Plan> for api_models::Plan {
+    fn from(plan: Plan) -> Self {
+        Self {
+            root: plan.root,
+            levels: plan.levels.into_iter().map(|l| l.into()).collect(),
+        }
     }
 }
 
@@ -269,6 +278,25 @@ impl Context {
 
     pub fn get_plan_mut(&mut self) -> &mut Plan {
         &mut self.plan
+    }
+}
+
+#[derive(Serialize)]
+pub struct Current {
+    pub index: Index,
+    pub level: Level,
+    pub task: Task,
+    pub history: Vec<String>,
+}
+
+impl From<Current> for api_models::Current {
+    fn from(current: Current) -> Self {
+        Self {
+            index: current.index,
+            level: current.level.into(),
+            task: current.task,
+            history: current.history,
+        }
     }
 }
 
@@ -455,14 +483,6 @@ pub struct Core {
     inner: Arc<Mutex<Context>>,
 }
 
-#[derive(Serialize)]
-pub struct Current {
-    index: Index,
-    level: Level,
-    task: Task,
-    history: Vec<String>,
-}
-
 impl Core {
     pub fn new(context: Context) -> Self {
         Self {
@@ -521,7 +541,7 @@ pub mod api {
     use tokio::net::TcpListener;
     use tower_http::cors::{Any, CorsLayer};
 
-    use super::{Core, Index, Plan};
+    use super::{api_models, Core, Index};
 
     /// Request to add a new task
     #[derive(Deserialize)]
@@ -607,14 +627,18 @@ pub mod api {
     }
 
     // Handler implementations
-    async fn get_plan(State(core): State<Core>) -> Json<ApiResponse<Plan>> {
+    async fn get_plan(State(core): State<Core>) -> Json<ApiResponse<api_models::Plan>> {
         let plan = core.get_plan();
-        Json(ApiResponse::success(plan))
+        let api_plan: api_models::Plan = plan.into();
+        Json(ApiResponse::success(api_plan))
     }
 
     async fn get_current(State(core): State<Core>) -> impl IntoResponse {
         match core.current() {
-            Some(current) => Json(ApiResponse::success(current)).into_response(),
+            Some(current) => {
+                let api_current: api_models::Current = current.into();
+                Json(ApiResponse::success(api_current)).into_response()
+            }
             None => (
                 StatusCode::NOT_FOUND,
                 Json(ApiResponse::<()>::error(
@@ -663,6 +687,219 @@ pub mod api {
                 )),
             )
                 .into_response()
+        }
+    }
+}
+
+// Client-oriented API models
+pub mod api_models {
+    use super::{Index, Task};
+    use serde::{Deserialize, Serialize};
+
+    #[derive(Debug, Clone, Serialize, Deserialize)]
+    pub struct Level {
+        pub description: String,
+        pub questions: Vec<String>,
+    }
+
+    impl From<super::Level> for Level {
+        fn from(level: super::Level) -> Self {
+            Self {
+                description: level.description.to_string(),
+                questions: level.questions.iter().map(|&q| q.to_string()).collect(),
+            }
+        }
+    }
+
+    #[derive(Debug, Clone, Serialize, Deserialize)]
+    pub struct Plan {
+        pub root: Task,
+        pub levels: Vec<Level>,
+    }
+
+    #[derive(Debug, Clone, Serialize, Deserialize)]
+    pub struct Current {
+        pub index: Index,
+        pub level: Level,
+        pub task: Task,
+        pub history: Vec<String>,
+    }
+}
+
+// API client module
+pub mod client {
+    use std::sync::Arc;
+
+    use reqwest::{Client as ReqwestClient, Error as ReqwestError};
+    use serde::{Deserialize, Serialize};
+
+    use super::{api_models, Index};
+
+    /// API client configuration
+    #[derive(Debug, Clone)]
+    pub struct ClientConfig {
+        pub base_url: String,
+    }
+
+    impl Default for ClientConfig {
+        fn default() -> Self {
+            Self {
+                base_url: "http://localhost:3000".to_string(),
+            }
+        }
+    }
+
+    /// Generic API response structure
+    #[derive(Debug, Deserialize)]
+    struct ApiResponse<T> {
+        success: bool,
+        data: Option<T>,
+        error: Option<String>,
+    }
+
+    /// Client errors
+    #[derive(Debug, thiserror::Error)]
+    pub enum ClientError {
+        #[error("HTTP error: {0}")]
+        Http(#[from] ReqwestError),
+
+        #[error("API error: {0}")]
+        Api(String),
+
+        #[error("Missing data in response")]
+        MissingData,
+    }
+
+    /// API client for the scatterbrain service
+    #[derive(Debug, Clone)]
+    pub struct Client {
+        http_client: Arc<ReqwestClient>,
+        config: ClientConfig,
+    }
+
+    impl Client {
+        /// Create a new client with default configuration
+        pub fn new() -> Self {
+            Self::with_config(ClientConfig::default())
+        }
+
+        /// Create a new client with custom configuration
+        pub fn with_config(config: ClientConfig) -> Self {
+            Self {
+                http_client: Arc::new(ReqwestClient::new()),
+                config,
+            }
+        }
+
+        /// Get the full plan
+        pub async fn get_plan(&self) -> Result<api_models::Plan, ClientError> {
+            let url = format!("{}/api/plan", self.config.base_url);
+            let response = self.http_client.get(&url).send().await?;
+            let api_response: ApiResponse<api_models::Plan> = response.json().await?;
+
+            if api_response.success {
+                api_response.data.ok_or(ClientError::MissingData)
+            } else {
+                Err(ClientError::Api(
+                    api_response
+                        .error
+                        .unwrap_or_else(|| "Unknown API error".to_string()),
+                ))
+            }
+        }
+
+        /// Get the current task
+        pub async fn get_current(&self) -> Result<api_models::Current, ClientError> {
+            let url = format!("{}/api/current", self.config.base_url);
+            let response = self.http_client.get(&url).send().await?;
+
+            if !response.status().is_success() {
+                return Err(ClientError::Api(format!(
+                    "HTTP error: {}",
+                    response.status()
+                )));
+            }
+
+            let api_response: ApiResponse<api_models::Current> = response.json().await?;
+
+            if api_response.success {
+                api_response.data.ok_or(ClientError::MissingData)
+            } else {
+                Err(ClientError::Api(
+                    api_response
+                        .error
+                        .unwrap_or_else(|| "Unknown API error".to_string()),
+                ))
+            }
+        }
+
+        /// Add a new task
+        pub async fn add_task(&self, description: String) -> Result<Index, ClientError> {
+            #[derive(Serialize)]
+            struct AddTaskRequest {
+                description: String,
+            }
+
+            let url = format!("{}/api/task", self.config.base_url);
+            let request = AddTaskRequest { description };
+            let response = self.http_client.post(&url).json(&request).send().await?;
+            let api_response: ApiResponse<Index> = response.json().await?;
+
+            if api_response.success {
+                api_response.data.ok_or(ClientError::MissingData)
+            } else {
+                Err(ClientError::Api(
+                    api_response
+                        .error
+                        .unwrap_or_else(|| "Unknown API error".to_string()),
+                ))
+            }
+        }
+
+        /// Complete the current task
+        pub async fn complete_task(&self) -> Result<(), ClientError> {
+            let url = format!("{}/api/task/complete", self.config.base_url);
+            let response = self.http_client.post(&url).send().await?;
+
+            if response.status().is_success() {
+                Ok(())
+            } else {
+                let api_response: ApiResponse<()> = response.json().await?;
+                Err(ClientError::Api(
+                    api_response
+                        .error
+                        .unwrap_or_else(|| "Unknown API error".to_string()),
+                ))
+            }
+        }
+
+        /// Move to a specific task
+        pub async fn move_to(&self, index: Index) -> Result<(), ClientError> {
+            #[derive(Serialize)]
+            struct MoveToRequest {
+                index: Index,
+            }
+
+            let url = format!("{}/api/move", self.config.base_url);
+            let request = MoveToRequest { index };
+            let response = self.http_client.post(&url).json(&request).send().await?;
+
+            if response.status().is_success() {
+                Ok(())
+            } else {
+                let api_response: ApiResponse<()> = response.json().await?;
+                Err(ClientError::Api(
+                    api_response
+                        .error
+                        .unwrap_or_else(|| "Unknown API error".to_string()),
+                ))
+            }
+        }
+    }
+
+    impl Default for Client {
+        fn default() -> Self {
+            Self::new()
         }
     }
 }
