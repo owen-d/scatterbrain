@@ -903,3 +903,216 @@ pub mod client {
         }
     }
 }
+
+// CLI module
+pub mod cli {
+    use std::process;
+
+    use clap::{Parser, Subcommand};
+
+    use crate::{
+        api::{serve, ServerConfig},
+        api_models,
+        client::{Client, ClientConfig, ClientError},
+        Context, Core, Plan, DEFAULT_LEVELS,
+    };
+
+    #[derive(Parser)]
+    #[command(author, version, about, long_about = None)]
+    pub struct Cli {
+        #[command(subcommand)]
+        command: Commands,
+
+        /// API server URL
+        #[arg(short, long, default_value = "http://localhost:3000")]
+        server: String,
+    }
+
+    #[derive(Subcommand)]
+    enum Commands {
+        /// Start the scatterbrain API server
+        Serve {
+            /// Port to listen on
+            #[arg(short, long, default_value_t = 3000)]
+            port: u16,
+        },
+
+        /// Task management commands
+        Task {
+            #[command(subcommand)]
+            command: TaskCommands,
+        },
+
+        /// Move to a task at the given index
+        Move {
+            /// Task index (e.g., 0 or 0,1,2 for nested tasks)
+            index: String,
+        },
+
+        /// Get the plan
+        Plan,
+
+        /// Get the current task
+        Current,
+    }
+
+    #[derive(Subcommand)]
+    enum TaskCommands {
+        /// Add a new task
+        Add {
+            /// Task description
+            description: String,
+        },
+
+        /// Complete the current task
+        Complete,
+    }
+
+    /// Run the CLI application
+    pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
+        let cli = Cli::parse();
+
+        match &cli.command {
+            Commands::Serve { port } => {
+                println!("Starting scatterbrain API server on port {}...", port);
+
+                // Create a default plan with the default levels
+                let plan = Plan::new(DEFAULT_LEVELS.to_vec());
+                let context = Context::new(plan);
+                let core = Core::new(context);
+
+                // Create a server configuration with the specified port
+                let config = ServerConfig {
+                    address: ([127, 0, 0, 1], *port).into(),
+                };
+
+                // Start the API server
+                serve(core, config).await?;
+                Ok(())
+            }
+
+            Commands::Task { command } => {
+                let client = create_client(&cli.server);
+
+                match command {
+                    TaskCommands::Add { description } => {
+                        let index = client.add_task(description.clone()).await?;
+                        println!("Added task: \"{}\" at index: {:?}", description, index);
+                        Ok(())
+                    }
+
+                    TaskCommands::Complete => {
+                        client.complete_task().await?;
+                        println!("Completed the current task");
+                        Ok(())
+                    }
+                }
+            }
+
+            Commands::Move { index } => {
+                let client = create_client(&cli.server);
+
+                // Parse the index string (format: 0 or 0,1,2)
+                let parsed_index = parse_index(index)?;
+
+                client.move_to(parsed_index).await?;
+                println!("Moved to task at index: {}", index);
+                Ok(())
+            }
+
+            Commands::Plan => {
+                let client = create_client(&cli.server);
+
+                let plan = client.get_plan().await?;
+                print_plan(&plan);
+                Ok(())
+            }
+
+            Commands::Current => {
+                let client = create_client(&cli.server);
+
+                match client.get_current().await {
+                    Ok(current) => {
+                        println!("Current Task:");
+                        println!("  Description: {}", current.task.description);
+                        println!("  Completed: {}", current.task.completed);
+                        println!("  Level: {}", current.level.description);
+                        println!("  Index: {:?}", current.index);
+
+                        if !current.task.subtasks.is_empty() {
+                            println!("\nSubtasks:");
+                            for (i, subtask) in current.task.subtasks.iter().enumerate() {
+                                println!(
+                                    "  {}. {} (completed: {})",
+                                    i, subtask.description, subtask.completed
+                                );
+                            }
+                        }
+
+                        Ok(())
+                    }
+                    Err(ClientError::Api(msg)) if msg.contains("Current task not found") => {
+                        println!("No current task selected. Use 'move' to select a task.");
+                        Ok(())
+                    }
+                    Err(e) => Err(e.into()),
+                }
+            }
+        }
+    }
+
+    fn create_client(server_url: &str) -> Client {
+        let config = ClientConfig {
+            base_url: server_url.to_string(),
+        };
+
+        Client::with_config(config)
+    }
+
+    fn parse_index(index_str: &str) -> Result<Vec<usize>, Box<dyn std::error::Error>> {
+        let parts: Result<Vec<usize>, _> = index_str
+            .split(',')
+            .map(|s| s.trim().parse::<usize>())
+            .collect();
+
+        match parts {
+            Ok(index) => Ok(index),
+            Err(_) => {
+                eprintln!("Error: Invalid index format. Use format like '0' or '0,1,2'");
+                process::exit(1);
+            }
+        }
+    }
+
+    fn print_plan(plan: &api_models::Plan) {
+        println!("Scatterbrain Plan:");
+        println!("Levels: {}", plan.levels.len());
+
+        println!("\nRoot Tasks:");
+        if plan.root.subtasks.is_empty() {
+            println!("  No tasks yet. Add some with 'scatterbrain task add'");
+        } else {
+            for (i, task) in plan.root.subtasks.iter().enumerate() {
+                println!(
+                    "  {}. {} (completed: {})",
+                    i, task.description, task.completed
+                );
+
+                // Print first level of subtasks if any
+                if !task.subtasks.is_empty() {
+                    for (j, subtask) in task.subtasks.iter().enumerate() {
+                        println!(
+                            "    {}.{}. {} (completed: {})",
+                            i, j, subtask.description, subtask.completed
+                        );
+                    }
+                }
+            }
+        }
+
+        println!("\nAvailable Levels:");
+        for (i, level) in plan.levels.iter().enumerate() {
+            println!("  {}. {}", i + 1, level.description);
+        }
+    }
+}
