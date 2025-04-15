@@ -224,7 +224,7 @@ impl Stream for EventStream {
         match self.receiver.try_recv() {
             Ok(_) => {
                 // Successfully received an update notification, send event to client
-                return Poll::Ready(Some(Ok(format!("event: update\ndata: change\n\n"))));
+                Poll::Ready(Some(Ok("event: update\ndata: change\n\n".to_string())))
             }
             Err(tokio::sync::broadcast::error::TryRecvError::Empty) => {
                 // No updates available now, register the waker to be notified later
@@ -234,17 +234,17 @@ impl Stream for EventStream {
                     tokio::time::sleep(std::time::Duration::from_millis(50)).await;
                     waker.wake();
                 });
-                return Poll::Pending;
+                Poll::Pending
             }
             Err(tokio::sync::broadcast::error::TryRecvError::Lagged(_)) => {
                 // Some messages were missed, but that's okay
                 // Just notify the client that there was a change
-                return Poll::Ready(Some(Ok(format!("event: update\ndata: change\n\n"))));
+                Poll::Ready(Some(Ok("event: update\ndata: change\n\n".to_string())))
             }
             Err(tokio::sync::broadcast::error::TryRecvError::Closed) => {
                 // Channel closed, try to resubscribe
                 self.receiver = self.core.subscribe();
-                return Poll::Pending;
+                Poll::Pending
             }
         }
     }

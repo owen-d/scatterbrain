@@ -363,12 +363,12 @@ fn create_example_tasks(context: &mut Context) {
     context.move_to(project_index.clone()).unwrap();
     let frontend_index = context.add_task("Implement Frontend".to_string());
     let backend_index = context.add_task("Implement Backend".to_string());
-    let db_index = context.add_task("Set up Database".to_string());
+    let _db_index = context.add_task("Set up Database".to_string());
 
     // Add subtasks to frontend
     context.move_to(frontend_index.clone()).unwrap();
     let ui_index = context.add_task("Design UI Components".to_string());
-    let auth_ui_index = context.add_task("Implement User Authentication UI".to_string());
+    let _auth_ui_index = context.add_task("Implement User Authentication UI".to_string());
     context.add_task("Create Dashboard View".to_string());
 
     // Mark UI task as completed
@@ -383,7 +383,7 @@ fn create_example_tasks(context: &mut Context) {
     // Add subtasks to data models
     context.move_to(data_index.clone()).unwrap();
     context.add_task("User Model".to_string());
-    let product_index = context.add_task("Product Model".to_string());
+    let _product_index = context.add_task("Product Model".to_string());
     context.add_task("Order Model".to_string());
 
     // Add subtasks to documentation
