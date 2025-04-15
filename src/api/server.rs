@@ -556,7 +556,6 @@ const HTML_TEMPLATE_HEADER: &str = r#"<!DOCTYPE html>
         <div class="reactive-status">
             <span class="status-indicator" id="connection-status"></span>
             <span class="status-text" id="status-text">Waiting to connect...</span>
-            <button class="manual-refresh" onclick="manualRefresh()">Refresh Now</button>
         </div>
     </div>
     <div class="container">
@@ -602,10 +601,6 @@ const HTML_TEMPLATE_FOOTER: &str = r#"
                 eventSource.close();
                 setTimeout(connectEvents, 3000);
             };
-        }
-        
-        function manualRefresh() {
-            window.location.reload();
         }
         
         // Start event connection when page loads

@@ -29,6 +29,10 @@ enum Commands {
         /// Port to listen on
         #[arg(short, long, default_value_t = 3000)]
         port: u16,
+
+        /// Populate with example task tree for UI testing
+        #[arg(long)]
+        example: bool,
     },
 
     /// Task management commands
@@ -77,12 +81,19 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
     let cli = Cli::parse();
 
     match &cli.command {
-        Commands::Serve { port } => {
+        Commands::Serve { port, example } => {
             println!("Starting scatterbrain API server on port {}...", port);
 
             // Create a default plan with the default levels
             let plan = Plan::new(default_levels());
-            let context = Context::new(plan);
+            let mut context = Context::new(plan);
+
+            // Add example tasks if requested
+            if *example {
+                println!("Populating with example task tree for UI testing...");
+                create_example_tasks(&mut context);
+            }
+
             let core = Core::new(context);
 
             // Create a server configuration with the specified port
@@ -251,6 +262,9 @@ Scatterbrain uses a multi-level approach to planning:
 
 1. START THE SERVER
    $ scatterbrain serve
+   
+   For UI testing with sample data:
+   $ scatterbrain serve --example
 
 2. CREATE A PLAN AND NAVIGATE THE LEVELS
    - Begin at Level 1 with high-level planning:
@@ -308,22 +322,23 @@ Scatterbrain uses a multi-level approach to planning:
 == COMMAND REFERENCE ==
 
 SERVER OPERATIONS:
-  $ scatterbrain serve [--port <PORT>]     Start the server
+  $ scatterbrain serve [--port <PORT>]           Start the server
+  $ scatterbrain serve --example                 Start server with sample tasks
 
 TASK MANAGEMENT:
-  $ scatterbrain task add "Task description"    Create new task
-  $ scatterbrain task complete                  Complete current task
+  $ scatterbrain task add "Task description"     Create new task
+  $ scatterbrain task complete                   Complete current task
   
 NAVIGATION:
-  $ scatterbrain move <INDEX>                   Navigate to a task
-                                               (e.g., 0 or 0,1,2)
+  $ scatterbrain move <INDEX>                    Navigate to a task
+                                                (e.g., 0 or 0,1,2)
 VIEWING:
-  $ scatterbrain plan                           View the full plan
-  $ scatterbrain current                        View current task
+  $ scatterbrain plan                            View the full plan
+  $ scatterbrain current                         View current task
   
 HELP:
-  $ scatterbrain guide                          Show this guide
-  $ scatterbrain <COMMAND> --help               Show command help
+  $ scatterbrain guide                           Show this guide
+  $ scatterbrain <COMMAND> --help                Show command help
 
 == TIPS FOR AGENTS ==
 
@@ -335,4 +350,55 @@ HELP:
 "#;
 
     println!("{}", guide);
+}
+
+/// Creates an example task tree for UI testing
+fn create_example_tasks(context: &mut Context) {
+    // Create some top-level tasks
+    let project_index = context.add_task("Build Web Application".to_string());
+    let docs_index = context.add_task("Write Documentation".to_string());
+    let test_index = context.add_task("Test Application".to_string());
+
+    // Add subtasks to the project
+    context.move_to(project_index.clone()).unwrap();
+    let frontend_index = context.add_task("Implement Frontend".to_string());
+    let backend_index = context.add_task("Implement Backend".to_string());
+    let db_index = context.add_task("Set up Database".to_string());
+
+    // Add subtasks to frontend
+    context.move_to(frontend_index.clone()).unwrap();
+    let ui_index = context.add_task("Design UI Components".to_string());
+    let auth_ui_index = context.add_task("Implement User Authentication UI".to_string());
+    context.add_task("Create Dashboard View".to_string());
+
+    // Mark UI task as completed
+    context.complete_task(ui_index);
+
+    // Add subtasks to backend
+    context.move_to(backend_index.clone()).unwrap();
+    context.add_task("Set up API Routes".to_string());
+    let auth_logic_index = context.add_task("Implement Authentication Logic".to_string());
+    let data_index = context.add_task("Create Data Models".to_string());
+
+    // Add subtasks to data models
+    context.move_to(data_index.clone()).unwrap();
+    context.add_task("User Model".to_string());
+    let product_index = context.add_task("Product Model".to_string());
+    context.add_task("Order Model".to_string());
+
+    // Add subtasks to documentation
+    context.move_to(docs_index.clone()).unwrap();
+    context.add_task("API Documentation".to_string());
+    context.add_task("User Manual".to_string());
+    context.add_task("Developer Guide".to_string());
+
+    // Add subtasks to testing
+    context.move_to(test_index.clone()).unwrap();
+    context.add_task("Unit Tests".to_string());
+    context.add_task("Integration Tests".to_string());
+    context.add_task("Performance Tests".to_string());
+
+    // Set a nested task as the current task
+    // This will highlight the auth logic task in the backend section
+    context.move_to(auth_logic_index).unwrap();
 }
