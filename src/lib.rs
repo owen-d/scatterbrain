@@ -1423,7 +1423,9 @@ pub mod client {
 pub mod cli {
     use std::process;
 
-    use clap::{Parser, Subcommand};
+    use clap::{CommandFactory, Parser, Subcommand};
+    use clap_complete::{generate, Shell};
+    use std::io;
 
     use crate::{
         api::{serve, ServerConfig},
@@ -1472,6 +1474,13 @@ pub mod cli {
 
         /// Interactive guide on how to use this tool
         Guide,
+
+        /// Generate shell completions
+        Completions {
+            /// The shell to generate completions for
+            #[arg(value_enum)]
+            shell: Shell,
+        },
     }
 
     #[derive(Subcommand)]
@@ -1579,6 +1588,14 @@ pub mod cli {
 
             Commands::Guide => {
                 print_guide();
+                Ok(())
+            }
+
+            Commands::Completions { shell } => {
+                // Generate completions for the specified shell
+                let mut cmd = Cli::command();
+                let bin_name = cmd.get_name().to_string();
+                generate(*shell, &mut cmd, bin_name, &mut io::stdout());
                 Ok(())
             }
         }
