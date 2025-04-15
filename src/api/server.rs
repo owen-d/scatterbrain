@@ -169,17 +169,15 @@ async fn move_to(
     State(core): State<Core>,
     Json(payload): Json<MoveToRequest>,
 ) -> impl IntoResponse {
-    let success = core.move_to(payload.index);
-    if success {
-        StatusCode::OK.into_response()
-    } else {
-        (
+    match core.move_to(payload.index) {
+        Some(description) => Json(ApiResponse::success(description)).into_response(),
+        None => (
             StatusCode::BAD_REQUEST,
-            Json(ApiResponse::<()>::error(
+            Json(ApiResponse::<String>::error(
                 "Failed to move to requested task".to_string(),
             )),
         )
-            .into_response()
+            .into_response(),
     }
 }
 

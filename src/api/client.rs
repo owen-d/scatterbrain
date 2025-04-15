@@ -149,7 +149,7 @@ impl Client {
     }
 
     /// Move to a specific task
-    pub async fn move_to(&self, index: Index) -> Result<(), ClientError> {
+    pub async fn move_to(&self, index: Index) -> Result<String, ClientError> {
         #[derive(Serialize)]
         struct MoveToRequest {
             index: Index,
@@ -160,9 +160,18 @@ impl Client {
         let response = self.http_client.post(&url).json(&request).send().await?;
 
         if response.status().is_success() {
-            Ok(())
+            let api_response: ApiResponse<String> = response.json().await?;
+            if api_response.success {
+                api_response.data.ok_or(ClientError::MissingData)
+            } else {
+                Err(ClientError::Api(
+                    api_response
+                        .error
+                        .unwrap_or_else(|| "Unknown API error".to_string()),
+                ))
+            }
         } else {
-            let api_response: ApiResponse<()> = response.json().await?;
+            let api_response: ApiResponse<String> = response.json().await?;
             Err(ClientError::Api(
                 api_response
                     .error

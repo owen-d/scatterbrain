@@ -119,8 +119,8 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
             // Parse the index string (format: 0 or 0,1,2)
             let parsed_index = parse_index(index)?;
 
-            client.move_to(parsed_index).await?;
-            println!("Moved to task at index: {}", index);
+            let description = client.move_to(parsed_index).await?;
+            println!("Moved to task: \"{}\" at index: {}", description, index);
             Ok(())
         }
 

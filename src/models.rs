@@ -60,12 +60,6 @@ pub fn implementation_level() -> Level {
     }
 }
 
-/// Constants for convenience when referencing specific levels
-pub const PLAN: &str = "plan";
-pub const ISOLATION: &str = "isolation";
-pub const ORDERING: &str = "ordering";
-pub const IMPLEMENTATION: &str = "implementation";
-
 /// Returns the default set of levels for planning
 pub fn default_levels() -> Vec<Level> {
     vec![
@@ -102,6 +96,11 @@ impl Task {
     /// Marks this task as completed
     pub fn complete(&mut self) {
         self.completed = true;
+
+        // Recursively complete all subtasks
+        for subtask in &mut self.subtasks {
+            subtask.complete();
+        }
     }
 
     /// Returns true if this task and all its subtasks are completed
@@ -212,19 +211,20 @@ impl Context {
         new_index
     }
 
-    pub fn move_to(&mut self, index: Index) -> bool {
+    pub fn move_to(&mut self, index: Index) -> Option<String> {
         // Validate the index
         if index.is_empty() {
             self.cursor = index;
-            return true;
+            return Some("root".to_string());
         }
 
         // Check if the index is valid
-        if let Some(_) = self.get_task(index.clone()) {
+        if let Some(task) = self.get_task(index.clone()) {
+            let description = task.description.clone();
             self.cursor = index;
-            true
+            Some(description)
         } else {
-            false
+            None
         }
     }
 
@@ -401,7 +401,7 @@ impl Core {
         result
     }
 
-    pub fn move_to(&self, index: Index) -> bool {
+    pub fn move_to(&self, index: Index) -> Option<String> {
         let mut context = match self.inner.lock() {
             Ok(guard) => guard,
             Err(poisoned) => poisoned.into_inner(),
@@ -440,18 +440,27 @@ mod tests {
         assert_eq!(task2_index, vec![1]);
 
         // Move to the first task
-        assert!(context.move_to(task1_index.clone()));
+        assert_eq!(
+            context.move_to(task1_index.clone()),
+            Some("Task 1".to_string())
+        );
 
         // Add a subtask to the first task
         let subtask1_index = context.add_task("Subtask 1".to_string());
         assert_eq!(subtask1_index, vec![0, 0]);
 
         // Move to the second task
-        assert!(context.move_to(task2_index.clone()));
+        assert_eq!(
+            context.move_to(task2_index.clone()),
+            Some("Task 2".to_string())
+        );
         assert_eq!(context.get_current_index(), &vec![1]);
 
         // Move to subtask 1
-        assert!(context.move_to(subtask1_index.clone()));
+        assert_eq!(
+            context.move_to(subtask1_index.clone()),
+            Some("Subtask 1".to_string())
+        );
         assert_eq!(context.get_current_index(), &vec![0, 0]);
     }
 
@@ -490,7 +499,7 @@ mod tests {
         let task2_index = context.add_task("Task 2".to_string());
 
         // Move to the first task and add subtasks
-        context.move_to(task1_index.clone());
+        assert!(context.move_to(task1_index.clone()).is_some());
         let subtask1_index = context.add_task("Subtask 1".to_string());
         let subtask2_index = context.add_task("Subtask 2".to_string());
 
@@ -511,17 +520,26 @@ mod tests {
         let plan = Plan::new(default_levels());
         let mut context = Context::new(plan);
         let root_index = context.add_task("Root task".to_string());
-        assert!(context.move_to(root_index.clone()));
+        assert_eq!(
+            context.move_to(root_index.clone()),
+            Some("Root task".to_string())
+        );
 
         assert_eq!(context.get_current_index(), &vec![0]);
 
         let task1_index = context.add_task("Task 1".to_string());
-        assert!(context.move_to(task1_index.clone()));
+        assert_eq!(
+            context.move_to(task1_index.clone()),
+            Some("Task 1".to_string())
+        );
         assert_eq!(context.get_current_index(), &vec![0, 0]);
 
         let task2_index = context.add_task("Task 2".to_string());
         assert_eq!(context.get_current_index(), &vec![0, 0]);
-        assert!(context.move_to(task2_index.clone()));
+        assert_eq!(
+            context.move_to(task2_index.clone()),
+            Some("Task 2".to_string())
+        );
         assert_eq!(context.get_current_index(), &vec![0, 0, 0]);
     }
 
@@ -531,14 +549,14 @@ mod tests {
         let plan = Plan::new(default_levels());
         let mut context = Context::new(plan);
         let root_index = context.add_task("Root task".to_string());
-        assert!(context.move_to(root_index.clone()));
+        assert!(context.move_to(root_index.clone()).is_some());
 
         // Add sibling tasks
         let task1_index = context.add_task("Task 1".to_string());
         let _ = context.add_task("Task 2".to_string());
 
         // Move to the first task and add a subtask
-        context.move_to(task1_index.clone());
+        assert!(context.move_to(task1_index.clone()).is_some());
         let subtask1_index = context.add_task("Subtask 1".to_string());
         assert_eq!(subtask1_index, vec![0, 0, 0]);
 
@@ -576,7 +594,7 @@ mod tests {
         assert_eq!(context.get_current_level(), 0);
 
         // Move to task1 (level 1)
-        context.move_to(task1_index.clone());
+        assert!(context.move_to(task1_index.clone()).is_some());
         assert_eq!(context.get_current_level(), 1);
 
         // Add a subtask to task1
@@ -584,7 +602,7 @@ mod tests {
         assert_eq!(context.get_current_level(), 1);
 
         // Move to subtask1 (level 2)
-        context.move_to(subtask1_index.clone());
+        assert!(context.move_to(subtask1_index.clone()).is_some());
         assert_eq!(context.get_current_level(), 2);
 
         // Set level back to 1
