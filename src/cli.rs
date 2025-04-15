@@ -205,27 +205,41 @@ fn print_plan(plan: &crate::models::Plan) {
     if plan.root.subtasks.is_empty() {
         println!("  No tasks yet. Add some with 'scatterbrain task add'");
     } else {
+        // Recursively print the task tree
         for (i, task) in plan.root.subtasks.iter().enumerate() {
-            println!(
-                "  {}. {} (completed: {})",
-                i, task.description, task.completed
-            );
-
-            // Print first level of subtasks if any
-            if !task.subtasks.is_empty() {
-                for (j, subtask) in task.subtasks.iter().enumerate() {
-                    println!(
-                        "    {}.{}. {} (completed: {})",
-                        i, j, subtask.description, subtask.completed
-                    );
-                }
-            }
+            print_task(task, vec![i]);
         }
     }
 
     println!("\nAvailable Levels:");
     for (i, level) in plan.levels.iter().enumerate() {
         println!("  {}. {}", i + 1, level.description);
+    }
+}
+
+/// Recursively prints a task and its subtasks with proper indentation
+fn print_task(task: &crate::models::Task, index: Vec<usize>) {
+    // Calculate indentation (2 spaces per level)
+    let indent = "  ".repeat(index.len());
+
+    // Format the index as a string (e.g., "0.1.2")
+    let index_str = index
+        .iter()
+        .map(|i| i.to_string())
+        .collect::<Vec<_>>()
+        .join(".");
+
+    // Print the current task
+    println!(
+        "{}{}. {} (completed: {})",
+        indent, index_str, task.description, task.completed
+    );
+
+    // Recursively print subtasks
+    for (i, subtask) in task.subtasks.iter().enumerate() {
+        let mut subtask_index = index.clone();
+        subtask_index.push(i);
+        print_task(subtask, subtask_index);
     }
 }
 
