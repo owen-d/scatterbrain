@@ -179,6 +179,30 @@ impl Client {
             ))
         }
     }
+
+    /// Change the abstraction level of a task
+    pub async fn change_level(&self, index: Index, level_index: usize) -> Result<(), ClientError> {
+        #[derive(Serialize)]
+        struct ChangeLevelRequest {
+            index: Index,
+            level_index: usize,
+        }
+
+        let url = format!("{}/api/task/level", self.config.base_url);
+        let request = ChangeLevelRequest { index, level_index };
+        let response = self.http_client.post(&url).json(&request).send().await?;
+
+        if response.status().is_success() {
+            Ok(())
+        } else {
+            let api_response: ApiResponse<()> = response.json().await?;
+            Err(ClientError::Api(
+                api_response
+                    .error
+                    .unwrap_or_else(|| "Unknown API error".to_string()),
+            ))
+        }
+    }
 }
 
 impl Default for Client {

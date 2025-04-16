@@ -34,6 +34,13 @@ pub struct MoveToRequest {
     pub index: Index,
 }
 
+/// Request to change a task's abstraction level
+#[derive(Deserialize)]
+pub struct ChangeLevelRequest {
+    pub index: Index,
+    pub level_index: usize,
+}
+
 /// Server configuration
 #[derive(Clone, Debug)]
 pub struct ServerConfig {
@@ -93,6 +100,7 @@ pub async fn serve(core: Core, config: ServerConfig) -> Result<(), Box<dyn std::
         .route("/api/current", get(get_current))
         .route("/api/task", post(add_task))
         .route("/api/task/complete", post(complete_task))
+        .route("/api/task/level", post(change_level))
         .route("/api/move", post(move_to))
         .route("/ui", get(ui_handler))
         .route("/ui/events", get(events_handler))
@@ -162,6 +170,23 @@ async fn complete_task(State(core): State<Core>) -> impl IntoResponse {
             )),
         )
             .into_response()
+    }
+}
+
+async fn change_level(
+    State(core): State<Core>,
+    Json(payload): Json<ChangeLevelRequest>,
+) -> impl IntoResponse {
+    match core.change_level(payload.index, payload.level_index) {
+        Ok(_) => Json(ApiResponse::success(
+            "Level changed successfully".to_string(),
+        ))
+        .into_response(),
+        Err(err) => (
+            StatusCode::BAD_REQUEST,
+            Json(ApiResponse::<String>::error(err)),
+        )
+            .into_response(),
     }
 }
 
@@ -278,12 +303,32 @@ fn render_ui_template(
 ) -> String {
     let mut html = String::from(HTML_TEMPLATE_HEADER);
 
+    // Add level legend
+    html.push_str("<div class='level-legend'>");
+    html.push_str("<h3>Abstraction Levels</h3>");
+
+    for (i, level) in plan.levels.iter().enumerate() {
+        html.push_str(&format!(
+            "<div class='level-item'><span class='task-level level-{}'>{}</span>",
+            i, i
+        ));
+        html.push_str(&format!(
+            "<div class='level-description'><strong>{}</strong>",
+            level.description
+        ));
+        html.push_str(&format!(
+            "<div class='level-focus'>{}</div></div></div>",
+            level.abstraction_focus
+        ));
+    }
+    html.push_str("</div>");
+
     // Add plan data
     html.push_str("<div class='plan-section'>");
     html.push_str("<h2>Plan</h2>");
 
     // Render tasks hierarchically
-    render_tasks_html(&mut html, &plan.root.subtasks, current, Vec::new());
+    render_tasks_html(&mut html, &plan.root.subtasks, current, plan, Vec::new());
 
     html.push_str("</div>");
 
@@ -304,7 +349,8 @@ fn render_ui_template(
             }
         ));
         html.push_str(&format!(
-            "<p><strong>Level:</strong> {}</p>",
+            "<p><strong>Level:</strong> {} - {}</p>",
+            curr.task.level_index.unwrap_or(curr.index.len() - 1),
             curr.level.description
         ));
         html.push_str(&format!(
@@ -348,6 +394,7 @@ fn render_tasks_html(
     html: &mut String,
     tasks: &[crate::models::Task],
     current: Option<&crate::models::Current>,
+    plan: &crate::models::Plan,
     path: Vec<usize>,
 ) {
     if tasks.is_empty() {
@@ -367,6 +414,9 @@ fn render_tasks_html(
             false
         };
 
+        // Determine the effective level (explicit or derived from position)
+        let level_idx = task.level_index.unwrap_or(current_path.len());
+
         let class = if is_current {
             if task.completed {
                 "current completed"
@@ -380,6 +430,12 @@ fn render_tasks_html(
         };
 
         html.push_str(&format!("<li class='{}'><div class='task-item'>", class));
+
+        // Level indicator
+        html.push_str(&format!(
+            "<span class='task-level level-{}'>{}</span>",
+            level_idx, level_idx
+        ));
 
         // Path identifier (e.g., 0.1.2)
         html.push_str(&format!(
@@ -405,7 +461,7 @@ fn render_tasks_html(
 
         // Render subtasks recursively
         if !task.subtasks.is_empty() {
-            render_tasks_html(html, &task.subtasks, current, current_path);
+            render_tasks_html(html, &task.subtasks, current, plan, current_path);
         }
 
         html.push_str("</li>");
@@ -482,6 +538,34 @@ const HTML_TEMPLATE_HEADER: &str = r#"<!DOCTYPE html>
             color: #7f8c8d;
             font-weight: bold;
         }
+        .task-level {
+            display: inline-block;
+            width: 24px;
+            height: 24px;
+            border-radius: 12px;
+            color: white;
+            text-align: center;
+            line-height: 24px;
+            font-size: 12px;
+            font-weight: bold;
+            margin-right: 8px;
+        }
+        .level-0 {
+            background-color: #3498db; /* Blue - High Level */
+            border: 2px solid #2980b9;
+        }
+        .level-1 {
+            background-color: #9b59b6; /* Purple - Isolation */
+            border: 2px solid #8e44ad;
+        }
+        .level-2 {
+            background-color: #2ecc71; /* Green - Ordering */
+            border: 2px solid #27ae60;
+        }
+        .level-3 {
+            background-color: #e67e22; /* Orange - Implementation */
+            border: 2px solid #d35400;
+        }
         .current {
             background-color: #e8f4fc;
             border-left: 4px solid #3498db;
@@ -544,6 +628,31 @@ const HTML_TEMPLATE_HEADER: &str = r#"<!DOCTYPE html>
         .manual-refresh {
             margin-left: auto;
         }
+        .level-legend {
+            margin-top: 20px;
+            background: white;
+            padding: 15px;
+            border-radius: 5px;
+            box-shadow: 0 2px 5px rgba(0,0,0,0.1);
+        }
+        .level-legend h3 {
+            margin-top: 0;
+            border-bottom: 1px solid #eee;
+            padding-bottom: 8px;
+        }
+        .level-item {
+            display: flex;
+            align-items: center;
+            margin-bottom: 10px;
+        }
+        .level-description {
+            margin-left: 10px;
+        }
+        .level-focus {
+            font-size: 0.9em;
+            color: #666;
+            margin-top: 5px;
+        }
     </style>
 </head>
 <body>
@@ -552,7 +661,8 @@ const HTML_TEMPLATE_HEADER: &str = r#"<!DOCTYPE html>
         <p>Use the CLI to interact with tasks:</p>
         <code>$ scatterbrain task add "New task"</code> | 
         <code>$ scatterbrain move 0,1</code> | 
-        <code>$ scatterbrain task complete</code>
+        <code>$ scatterbrain task complete</code> |
+        <code>$ scatterbrain task change-level 1</code>
         <div class="reactive-status">
             <span class="status-indicator" id="connection-status"></span>
             <span class="status-text" id="status-text">Waiting to connect...</span>

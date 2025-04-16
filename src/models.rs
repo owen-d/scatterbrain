@@ -97,6 +97,7 @@ pub struct Task {
     pub description: String,
     pub completed: bool,
     pub subtasks: Vec<Task>,
+    pub level_index: Option<usize>,
 }
 
 impl Task {
@@ -106,6 +107,17 @@ impl Task {
             description,
             completed: false,
             subtasks: Vec::new(),
+            level_index: None,
+        }
+    }
+
+    /// Creates a new task with a specific level index
+    pub fn with_level(description: String, level_index: usize) -> Self {
+        Self {
+            description,
+            completed: false,
+            subtasks: Vec::new(),
+            level_index: Some(level_index),
         }
     }
 
@@ -127,6 +139,16 @@ impl Task {
     /// Returns true if this task and all its subtasks are completed
     pub fn is_fully_completed(&self) -> bool {
         self.completed && self.subtasks.iter().all(|t| t.is_fully_completed())
+    }
+
+    /// Sets the level index for this task
+    pub fn set_level(&mut self, level_index: usize) {
+        self.level_index = Some(level_index);
+    }
+
+    /// Gets the effective level index (explicit or derived from position)
+    pub fn get_effective_level(&self, depth: usize) -> usize {
+        self.level_index.unwrap_or(depth)
     }
 }
 
@@ -168,8 +190,10 @@ impl Plan {
             return None;
         }
 
+        // Use the task's explicit level_index if set, otherwise fallback to position-based level
+        let level_idx = current.level_index.unwrap_or(index.len() - 1);
         self.levels
-            .get(index.len() - 1)
+            .get(level_idx)
             .cloned()
             .map(|level| (level, current.clone(), history))
     }
@@ -439,6 +463,73 @@ impl Core {
     // Subscribe to state updates
     pub fn subscribe(&self) -> tokio::sync::broadcast::Receiver<()> {
         self.update_tx.subscribe()
+    }
+
+    /// Changes the level of a task at the given index
+    pub fn change_level(&self, index: Index, level_index: usize) -> Result<(), String> {
+        let mut context = match self.inner.lock() {
+            Ok(guard) => guard,
+            Err(poisoned) => poisoned.into_inner(),
+        };
+
+        // Validate: the level must exist
+        if level_index >= context.plan.levels.len() {
+            return Err(format!("Level index {} is out of bounds", level_index));
+        }
+
+        // Validate parent-child level relationship
+        if !index.is_empty() {
+            // This isn't the root task, so check parent level
+            let parent_index = index[0..index.len() - 1].to_vec();
+            if let Some(parent) = context.get_task(parent_index.clone()) {
+                let parent_level = parent.level_index.unwrap_or(parent_index.len());
+                if level_index > parent_level {
+                    return Err(format!(
+                        "Child task cannot have a higher abstraction level ({}) than its parent ({})",
+                        level_index, parent_level
+                    ));
+                }
+            }
+        }
+
+        // Define a recursive function to check all child levels
+        fn check_children(task: &Task, depth: usize, max_level: usize) -> Result<(), String> {
+            for subtask in &task.subtasks {
+                let subtask_level = subtask.level_index.unwrap_or(depth + 1);
+                if subtask_level > max_level {
+                    return Err(format!(
+                        "Cannot set level to {} because a child task has a higher level ({})",
+                        max_level, subtask_level
+                    ));
+                }
+
+                // Recursively check this subtask's children
+                if let Err(e) = check_children(subtask, depth + 1, max_level) {
+                    return Err(e);
+                }
+            }
+            Ok(())
+        }
+
+        // Validate that no child has a higher level
+        if let Some(task) = context.get_task(index.clone()) {
+            if let Err(e) = check_children(task, index.len(), level_index) {
+                return Err(e);
+            }
+        }
+
+        // Apply the change
+        if let Some(task) = context.get_task_mut(index) {
+            // Set the level
+            task.set_level(level_index);
+
+            // Notify observers about the state change
+            let _ = self.update_tx.send(());
+
+            Ok(())
+        } else {
+            Err("Task not found".to_string())
+        }
     }
 }
 

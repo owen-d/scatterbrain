@@ -70,10 +70,22 @@ enum TaskCommands {
     Add {
         /// Task description
         description: String,
+
+        /// Level index (starting from 0, lower index = higher abstraction level)
+        #[arg(short, long)]
+        level: Option<usize>,
     },
 
     /// Complete the current task
     Complete,
+
+    /// Change the abstraction level of the current task
+    #[command(name = "change-level")]
+    ChangeLevel {
+        /// Level index (starting from 0)
+        #[arg(help = "The level index to set (lower index = higher abstraction level)")]
+        level_index: usize,
+    },
 }
 
 /// Run the CLI application
@@ -110,8 +122,23 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
             let client = create_client(&cli.server);
 
             match command {
-                TaskCommands::Add { description } => {
+                TaskCommands::Add { description, level } => {
+                    // Add the task
                     let index = client.add_task(description.clone()).await?;
+
+                    // If a level is specified, set it
+                    if let Some(level_val) = level {
+                        if let Err(e) = client.change_level(index.clone(), *level_val).await {
+                            println!("Warning: Could not set level: {}", e);
+                        } else {
+                            println!(
+                                "Added task: \"{}\" with level {} at index: {:?}",
+                                description, level_val, index
+                            );
+                            return Ok(());
+                        }
+                    }
+
                     println!("Added task: \"{}\" at index: {:?}", description, index);
                     Ok(())
                 }
@@ -119,6 +146,20 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
                 TaskCommands::Complete => {
                     client.complete_task().await?;
                     println!("Completed the current task");
+                    Ok(())
+                }
+
+                TaskCommands::ChangeLevel { level_index } => {
+                    // Get the current position
+                    let current = client.get_current().await?;
+                    let index = current.index;
+
+                    // Change the level
+                    client.change_level(index, *level_index).await?;
+                    println!(
+                        "Changed the abstraction level of the current task to {}",
+                        level_index
+                    );
                     Ok(())
                 }
             }
