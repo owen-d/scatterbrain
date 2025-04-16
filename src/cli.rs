@@ -213,7 +213,7 @@ fn print_plan(plan: &crate::models::Plan) {
 
     println!("\nAvailable Levels:");
     for (i, level) in plan.levels.iter().enumerate() {
-        println!("  {}. {}", i + 1, level.description);
+        println!("  {}. {}", i + 1, level.get_guidance());
     }
 }
 

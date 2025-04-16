@@ -17,7 +17,7 @@ impl Level {
     /// Returns a string that guides agents on how to effectively use this abstraction level
     pub fn get_guidance(&self) -> String {
         format!(
-            "Current abstraction level: {}\n\nFocus instruction: {}\n\nRelevant questions to consider:\n{}",
+            "Abstraction level: {}\n\nFocus instruction: {}\n\nRelevant questions to consider:\n{}",
             self.description,
             self.abstraction_focus,
             self.questions
@@ -336,21 +336,6 @@ impl Context {
     pub fn get_plan_mut(&mut self) -> &mut Plan {
         &mut self.plan
     }
-
-    /// Returns the current level with guidance on appropriate abstraction
-    pub fn get_current_level_with_guidance(&self) -> Option<String> {
-        let level_index = self.get_current_level();
-
-        // Ensure we don't go out of bounds
-        if level_index == 0 || level_index > self.plan.levels.len() {
-            return None;
-        }
-
-        // Get the level (adjusting for 0-indexing)
-        let level = &self.plan.levels[level_index - 1];
-
-        Some(level.get_guidance())
-    }
 }
 
 #[derive(Clone, Serialize, Deserialize)]
@@ -454,16 +439,6 @@ impl Core {
     // Subscribe to state updates
     pub fn subscribe(&self) -> tokio::sync::broadcast::Receiver<()> {
         self.update_tx.subscribe()
-    }
-
-    // Expose abstraction level guidance to API
-    pub fn get_level_guidance(&self) -> Option<String> {
-        let context = match self.inner.lock() {
-            Ok(guard) => guard,
-            Err(poisoned) => poisoned.into_inner(),
-        };
-
-        context.get_current_level_with_guidance()
     }
 }
 
