@@ -10,6 +10,23 @@ use std::sync::{Arc, Mutex};
 pub struct Level {
     pub description: String,
     pub questions: Vec<String>,
+    pub abstraction_focus: String,
+}
+
+impl Level {
+    /// Returns a string that guides agents on how to effectively use this abstraction level
+    pub fn get_guidance(&self) -> String {
+        format!(
+            "Current abstraction level: {}\n\nFocus instruction: {}\n\nRelevant questions to consider:\n{}",
+            self.description,
+            self.abstraction_focus,
+            self.questions
+                .iter()
+                .map(|q| format!("- {}", q))
+                .collect::<Vec<_>>()
+                .join("\n")
+        )
+    }
 }
 
 /// Returns the default planning level
@@ -22,6 +39,7 @@ pub fn plan_level() -> Level {
             "Is this approach extensible?".to_string(),
             "Does this approach provide good, minimally leaking abstractions?".to_string(),
         ],
+        abstraction_focus: "Maintain altitude by focusing on system wholes. Avoid implementation details. Think about conceptual patterns rather than code structures. Consider how components will interact without specifying their internal workings.".to_string(),
     }
 }
 
@@ -34,6 +52,7 @@ pub fn isolation_level() -> Level {
             "If possible, can each part be completed and verified independently".to_string(),
             "Are the boundaries between pieces modular and extensible?".to_string(),
         ],
+        abstraction_focus: "Focus on interfaces and boundaries between components. Define clear inputs and outputs for each part. Identify dependencies while preserving modularity. Look for natural divisions in the problem space.".to_string(),
     }
 }
 
@@ -45,6 +64,7 @@ pub fn ordering_level() -> Level {
             "Do we move from foundational building blocks to more complex concepts?".to_string(),
             "Do we follow idiomatic design patterns?".to_string(),
         ],
+        abstraction_focus: "Think about sequence and progression. Identify dependencies and build order without diving into implementation details. Consider critical paths and bottlenecks. Focus on logical flow and execution constraints.".to_string(),
     }
 }
 
@@ -57,6 +77,7 @@ pub fn implementation_level() -> Level {
             "Is each task complimentary to, or does it build upon, the previous tasks?".to_string(),
             "Does each task minimize the execution risk of the other tasks?".to_string(),
         ],
+        abstraction_focus: "Focus on concrete, actionable steps. Define specific code changes or artifacts to produce. Reference higher abstractions when needed but maintain focus on precise implementation. Consider error cases and edge conditions.".to_string(),
     }
 }
 
@@ -315,6 +336,21 @@ impl Context {
     pub fn get_plan_mut(&mut self) -> &mut Plan {
         &mut self.plan
     }
+
+    /// Returns the current level with guidance on appropriate abstraction
+    pub fn get_current_level_with_guidance(&self) -> Option<String> {
+        let level_index = self.get_current_level();
+
+        // Ensure we don't go out of bounds
+        if level_index == 0 || level_index > self.plan.levels.len() {
+            return None;
+        }
+
+        // Get the level (adjusting for 0-indexing)
+        let level = &self.plan.levels[level_index - 1];
+
+        Some(level.get_guidance())
+    }
 }
 
 #[derive(Clone, Serialize, Deserialize)]
@@ -323,6 +359,7 @@ pub struct Current {
     pub level: Level,
     pub task: Task,
     pub history: Vec<String>,
+    pub abstraction_guidance: Option<String>,
 }
 
 #[derive(Clone)]
@@ -361,11 +398,14 @@ impl Core {
 
         let index = context.get_current_index();
         if let Some((level, task, history)) = context.plan.get_with_history(index.clone()) {
+            let abstraction_guidance = context.get_current_level_with_guidance();
+
             Some(Current {
                 index: index.clone(),
                 level,
                 task,
                 history,
+                abstraction_guidance,
             })
         } else {
             None
@@ -418,6 +458,16 @@ impl Core {
     // Subscribe to state updates
     pub fn subscribe(&self) -> tokio::sync::broadcast::Receiver<()> {
         self.update_tx.subscribe()
+    }
+
+    // Expose abstraction level guidance to API
+    pub fn get_level_guidance(&self) -> Option<String> {
+        let context = match self.inner.lock() {
+            Ok(guard) => guard,
+            Err(poisoned) => poisoned.into_inner(),
+        };
+
+        context.get_current_level_with_guidance()
     }
 }
 
@@ -569,6 +619,7 @@ mod tests {
 
         // Verify the level is correct (3rd level is ordering)
         assert_eq!(level.description, ordering_level().description);
+        assert_eq!(level.abstraction_focus, ordering_level().abstraction_focus);
 
         // Verify the task is correct
         assert_eq!(task.description, "Subtask 1");
