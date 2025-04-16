@@ -1,4 +1,5 @@
-use scatterbrain::models::{default_levels, Context, Plan, Task};
+use scatterbrain::levels::default_levels;
+use scatterbrain::models::{Context, Plan, Task};
 
 #[test]
 fn test_task_creation_with_level() {
@@ -43,42 +44,77 @@ fn test_effective_level_calculation() {
 fn test_context_level_constraints() {
     // Create a plan with default levels
     let plan = Plan::new(default_levels());
-    let mut context = Context::new(plan);
+    let context = Context::new(plan);
+    let core = scatterbrain::models::Core::new(context);
 
-    // Add a root task and set its level
-    let root_task_index = context.add_task("Root task".to_string());
-    assert!(context.get_task(root_task_index.clone()).is_some());
+    // Add a root task
+    let root_task_index = core.add_task("Root task".to_string()).unwrap();
+
+    // Set root task to level 2 (should succeed)
+    assert!(core.change_level(root_task_index.clone(), 2).is_ok());
 
     // Move to the root task
-    assert!(context.move_to(root_task_index.clone()).is_some());
+    core.move_to(root_task_index.clone());
 
     // Add a subtask
-    let subtask_index = context.add_task("Subtask".to_string());
+    let subtask_index = core.add_task("Subtask".to_string()).unwrap();
 
-    // Set levels directly on the root task
-    {
-        let root_task = context.get_task_mut(root_task_index.clone()).unwrap();
-        root_task.set_level(2);
-        assert_eq!(root_task.level_index, Some(2));
-    }
+    // Set subtask to level 1 (higher abstraction, should succeed)
+    assert!(
+        core.change_level(subtask_index.clone(), 1).is_ok(),
+        "Setting subtask to higher abstraction (lower level number) should succeed"
+    );
 
-    // Set subtask level lower than parent (higher abstraction)
-    {
-        let subtask = context.get_task_mut(subtask_index.clone()).unwrap();
-        subtask.set_level(1);
-        assert_eq!(subtask.level_index, Some(1));
-    }
+    // Set subtask to level 2 (same as parent, should succeed)
+    assert!(
+        core.change_level(subtask_index.clone(), 2).is_ok(),
+        "Setting subtask to same level as parent should succeed"
+    );
+
+    // Set subtask to level 3 (lower abstraction than parent, should fail)
+    let result = core.change_level(subtask_index.clone(), 3);
+    assert!(
+        result.is_err(),
+        "Setting subtask to lower abstraction (higher level number) than parent should fail"
+    );
+    assert!(result.unwrap_err().contains("higher abstraction level"));
+
+    // Move to the subtask
+    core.move_to(subtask_index.clone());
 
     // Add a sub-subtask
-    assert!(context.move_to(subtask_index.clone()).is_some());
-    let sub_subtask_index = context.add_task("Sub-subtask".to_string());
+    let sub_subtask_index = core.add_task("Sub-subtask".to_string()).unwrap();
 
-    // Set level equal to parent
-    {
-        let sub_subtask = context.get_task_mut(sub_subtask_index.clone()).unwrap();
-        sub_subtask.set_level(1);
-        assert_eq!(sub_subtask.level_index, Some(1));
-    }
+    // Set parent to level 1
+    assert!(core.change_level(subtask_index.clone(), 1).is_ok());
+
+    // Try to set sub-subtask to level 2 (should fail because parent is level 1)
+    let result = core.change_level(sub_subtask_index.clone(), 2);
+    assert!(
+        result.is_err(),
+        "Setting sub-subtask to lower abstraction than parent should fail"
+    );
+
+    // Set sub-subtask to level 0 (higher abstraction than parent, should succeed)
+    assert!(
+        core.change_level(sub_subtask_index.clone(), 0).is_ok(),
+        "Setting sub-subtask to higher abstraction than parent should succeed"
+    );
+
+    // Verify if a parent's level can be changed if it would violate child constraints
+
+    // Set sub-subtask level to 1 (same as parent)
+    assert!(core.change_level(sub_subtask_index.clone(), 1).is_ok());
+
+    // Try to increase parent's level to 2 (should fail, as child is at level 1)
+    let result = core.change_level(subtask_index.clone(), 2);
+    assert!(
+        result.is_err(),
+        "Parent level change that would violate child constraints should fail"
+    );
+    assert!(result
+        .unwrap_err()
+        .contains("child task has a higher level"));
 }
 
 #[test]

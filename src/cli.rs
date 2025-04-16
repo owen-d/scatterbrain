@@ -315,13 +315,7 @@ Scatterbrain uses a multi-level approach to planning:
 
 == WORKFLOW FOR AGENTS ==
 
-1. START THE SERVER
-   $ scatterbrain serve
-   
-   For UI testing with sample data:
-   $ scatterbrain serve --example
-
-2. CREATE A PLAN AND NAVIGATE THE LEVELS
+1. CREATE A PLAN AND NAVIGATE THE LEVELS
    - Begin at Level 1 with high-level planning:
      $ scatterbrain task add "Design system architecture"
      $ scatterbrain move 0
@@ -332,7 +326,7 @@ Scatterbrain uses a multi-level approach to planning:
      
    - Continue adding more granular tasks at deeper levels
 
-3. STAY ON TRACK
+2. STAY ON TRACK
    - Regularly review your plan:
      $ scatterbrain plan
      
@@ -345,7 +339,7 @@ Scatterbrain uses a multi-level approach to planning:
    - Move between tasks to adapt to changing priorities:
      $ scatterbrain move 1,2
 
-4. PROGRESSIVE REFINEMENT
+3. PROGRESSIVE REFINEMENT
    - Start with broad strokes at Level 1
    - Refine details as you move to deeper levels
    - Complete higher-level tasks only when all subtasks are done
@@ -376,13 +370,11 @@ Scatterbrain uses a multi-level approach to planning:
 
 == COMMAND REFERENCE ==
 
-SERVER OPERATIONS:
-  $ scatterbrain serve [--port <PORT>]           Start the server
-  $ scatterbrain serve --example                 Start server with sample tasks
-
 TASK MANAGEMENT:
   $ scatterbrain task add "Task description"     Create new task
+  $ scatterbrain task add --level 0 "Task desc"  Create task with specific level
   $ scatterbrain task complete                   Complete current task
+  $ scatterbrain task change-level 1             Change current task level
   
 NAVIGATION:
   $ scatterbrain move <INDEX>                    Navigate to a task
