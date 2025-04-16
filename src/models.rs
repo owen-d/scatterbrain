@@ -11,10 +11,10 @@ pub use crate::levels::{default_levels, Level};
 /// Represents a task in the LLM's work
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Task {
-    pub description: String,
-    pub completed: bool,
-    pub subtasks: Vec<Task>,
-    pub level_index: Option<usize>,
+    description: String,
+    completed: bool,
+    subtasks: Vec<Task>,
+    level_index: Option<usize>,
 }
 
 impl Task {
@@ -39,12 +39,12 @@ impl Task {
     }
 
     /// Adds a subtask to this task
-    pub fn add_subtask(&mut self, subtask: Task) {
+    pub(crate) fn add_subtask(&mut self, subtask: Task) {
         self.subtasks.push(subtask);
     }
 
     /// Marks this task as completed
-    pub fn complete(&mut self) {
+    pub(crate) fn complete(&mut self) {
         self.completed = true;
 
         // Recursively complete all subtasks
@@ -53,26 +53,36 @@ impl Task {
         }
     }
 
-    /// Returns true if this task and all its subtasks are completed
-    pub fn is_fully_completed(&self) -> bool {
-        self.completed && self.subtasks.iter().all(|t| t.is_fully_completed())
-    }
-
     /// Sets the level index for this task
-    pub fn set_level(&mut self, level_index: usize) {
+    pub(crate) fn set_level(&mut self, level_index: usize) {
         self.level_index = Some(level_index);
     }
 
-    /// Gets the effective level index (explicit or derived from position)
-    pub fn get_effective_level(&self, depth: usize) -> usize {
-        self.level_index.unwrap_or(depth)
+    /// Gets the description of this task
+    pub fn description(&self) -> &str {
+        &self.description
+    }
+
+    /// Checks if this task is completed
+    pub fn is_completed(&self) -> bool {
+        self.completed
+    }
+
+    /// Gets the subtasks of this task
+    pub fn subtasks(&self) -> &[Task] {
+        &self.subtasks
+    }
+
+    /// Gets the level index if it's explicitly set
+    pub fn level_index(&self) -> Option<usize> {
+        self.level_index
     }
 }
 
 #[derive(Clone, Serialize, Deserialize)]
 pub struct Plan {
-    pub root: Task,
-    pub levels: Vec<Level>,
+    root: Task,
+    levels: Vec<Level>,
 }
 
 impl Plan {
@@ -85,20 +95,20 @@ impl Plan {
     }
 
     /// Returns the task at the given index, along with the hierarchy of task descriptions that led to it
-    pub fn get_with_history(&self, index: Index) -> Option<(Level, Task, Vec<String>)> {
+    pub(crate) fn get_with_history(&self, index: Index) -> Option<(Level, Task, Vec<String>)> {
         let mut current = &self.root;
         let mut history = Vec::new();
 
         for &i in &index {
-            if i >= current.subtasks.len() {
+            if i >= current.subtasks().len() {
                 return None;
             }
-            current = &current.subtasks[i];
+            current = &current.subtasks()[i];
 
             // Only add the description after descending (to avoid the implicit root)
             // and only if there are more levels to descend into (to avoid the final leaf which is included in full)
             if i < index.len() - 1 {
-                history.push(current.description.clone());
+                history.push(current.description().to_string());
             }
         }
 
@@ -108,11 +118,31 @@ impl Plan {
         }
 
         // Use the task's explicit level_index if set, otherwise fallback to position-based level
-        let level_idx = current.level_index.unwrap_or(index.len() - 1);
+        let level_idx = current.level_index().unwrap_or(index.len() - 1);
         self.levels
             .get(level_idx)
             .cloned()
             .map(|level| (level, current.clone(), history))
+    }
+
+    /// Returns the root task
+    pub(crate) fn root(&self) -> &Task {
+        &self.root
+    }
+
+    /// Returns the root task mutably
+    pub(crate) fn root_mut(&mut self) -> &mut Task {
+        &mut self.root
+    }
+
+    /// Returns the levels in this plan
+    pub fn levels(&self) -> &[Level] {
+        &self.levels
+    }
+
+    /// Returns the number of levels in the plan
+    pub fn level_count(&self) -> usize {
+        self.levels.len()
     }
 }
 
@@ -148,21 +178,22 @@ impl Context {
     }
 
     // Task creation and navigation
+    /// Adds a new task with the given description
     pub fn add_task(&mut self, description: String) -> Index {
         let task = Task::new(description);
         let new_index;
 
         if self.cursor.is_empty() {
             // Adding to root task, special case
-            self.plan.root.add_subtask(task);
-            new_index = vec![self.plan.root.subtasks.len() - 1];
+            self.plan.root_mut().add_subtask(task);
+            new_index = vec![self.plan.root().subtasks().len() - 1];
         } else {
             // Navigate to the current task
             let current = self.get_current_task_mut().unwrap();
 
             // Add the new task
             current.add_subtask(task);
-            let task_index = current.subtasks.len() - 1;
+            let task_index = current.subtasks().len() - 1;
 
             // Create the new index
             let mut new_index = self.cursor.clone();
@@ -173,6 +204,7 @@ impl Context {
         new_index
     }
 
+    /// Moves to the task at the given index
     pub fn move_to(&mut self, index: Index) -> Option<String> {
         // Validate the index
         if index.is_empty() {
@@ -182,7 +214,7 @@ impl Context {
 
         // Check if the index is valid
         if let Some(task) = self.get_task(index.clone()) {
-            let description = task.description.clone();
+            let description = task.description().to_string();
             self.cursor = index;
             Some(description)
         } else {
@@ -191,6 +223,7 @@ impl Context {
     }
 
     // Task state management
+    /// Completes the task at the given index
     pub fn complete_task(&mut self, index: Index) -> bool {
         if let Some(task) = self.get_task_mut(index) {
             task.complete();
@@ -200,65 +233,144 @@ impl Context {
         }
     }
 
+    /// Changes the level of a task at the given index
+    pub fn change_level(&mut self, index: Index, level_index: usize) -> Result<(), String> {
+        // Validate: the level must exist
+        if level_index >= self.plan.level_count() {
+            return Err(format!("Level index {} is out of bounds", level_index));
+        }
+
+        // Validate parent-child level relationship
+        if !index.is_empty() {
+            // This isn't the root task, so check parent level
+            let parent_index = index[0..index.len() - 1].to_vec();
+            if let Some(parent) = self.get_task(parent_index.clone()) {
+                let parent_level = parent.level_index().unwrap_or(parent_index.len());
+                if level_index > parent_level {
+                    return Err(format!(
+                        "Child task cannot have a higher abstraction level ({}) than its parent ({})",
+                        level_index, parent_level
+                    ));
+                }
+            }
+        }
+
+        // Define a recursive function to check all child levels
+        fn check_children(task: &Task, depth: usize, max_level: usize) -> Result<(), String> {
+            for subtask in task.subtasks() {
+                let subtask_level = subtask.level_index().unwrap_or(depth + 1);
+                if subtask_level > max_level {
+                    return Err(format!(
+                        "Cannot set level to {} because a child task has a higher level ({})",
+                        max_level, subtask_level
+                    ));
+                }
+
+                // Recursively check this subtask's children
+                if let Err(e) = check_children(subtask, depth + 1, max_level) {
+                    return Err(e);
+                }
+            }
+            Ok(())
+        }
+
+        // Validate that no child has a higher level
+        if let Some(task) = self.get_task(index.clone()) {
+            if let Err(e) = check_children(task, index.len(), level_index) {
+                return Err(e);
+            }
+        }
+
+        // Apply the change
+        if let Some(task) = self.get_task_mut(index) {
+            // Set the level
+            task.set_level(level_index);
+            Ok(())
+        } else {
+            Err("Task not found".to_string())
+        }
+    }
+
     // Information retrieval
-    pub fn get_task(&self, index: Index) -> Option<&Task> {
+    /// Gets the task at the given index
+    fn get_task(&self, index: Index) -> Option<&Task> {
         if index.is_empty() {
-            return Some(&self.plan.root);
+            return Some(self.plan.root());
         }
 
-        let mut current = &self.plan.root;
+        let mut current = self.plan.root();
         for &idx in &index {
-            if idx >= current.subtasks.len() {
+            if idx >= current.subtasks().len() {
                 return None;
             }
-            current = &current.subtasks[idx];
+            current = &current.subtasks()[idx];
         }
 
         Some(current)
     }
 
-    pub fn get_task_mut(&mut self, index: Index) -> Option<&mut Task> {
+    /// Gets the task at the given index mutably
+    fn get_task_mut(&mut self, index: Index) -> Option<&mut Task> {
         if index.is_empty() {
-            return Some(&mut self.plan.root);
+            return Some(self.plan.root_mut());
         }
 
-        let mut current = &mut self.plan.root;
-        for &idx in &index {
-            if idx >= current.subtasks.len() {
-                return None;
+        // Using a recursive approach since we can't easily get mutable references
+        // through iterative indexing with private fields
+        fn get_task_at_path<'a>(task: &'a mut Task, path: &[usize]) -> Option<&'a mut Task> {
+            if path.is_empty() {
+                return Some(task);
             }
-            current = &mut current.subtasks[idx];
+
+            let idx = path[0];
+            let remaining = &path[1..];
+
+            if idx >= task.subtasks().len() {
+                None
+            } else {
+                // We need to reach into the private field directly
+                // This is fine since we're in the same crate
+                let subtask = &mut task.subtasks[idx];
+                get_task_at_path(subtask, remaining)
+            }
         }
 
-        Some(current)
+        // Call the recursive helper
+        get_task_at_path(self.plan.root_mut(), &index)
     }
 
+    /// Gets the current task
     pub fn get_current_task(&self) -> Option<&Task> {
         self.get_task(self.cursor.clone())
     }
 
-    pub fn get_current_task_mut(&mut self) -> Option<&mut Task> {
+    /// Gets the current task mutably
+    fn get_current_task_mut(&mut self) -> Option<&mut Task> {
         self.get_task_mut(self.cursor.clone())
     }
 
+    /// Gets the current index
     pub fn get_current_index(&self) -> &Index {
         &self.cursor
     }
 
+    /// Gets the current level based on cursor depth
     pub fn get_current_level(&self) -> usize {
         self.cursor.len()
     }
 
+    /// Sets the current level by trimming the cursor
     pub fn set_current_level(&mut self, level: usize) {
         while self.cursor.len() > level {
             self.cursor.pop();
         }
     }
 
+    /// Gets subtasks of the task at the given index
     pub fn get_subtasks(&self, index: Index) -> Vec<(Index, &Task)> {
         if let Some(task) = self.get_task(index.clone()) {
             let mut result = Vec::new();
-            for (i, subtask) in task.subtasks.iter().enumerate() {
+            for (i, subtask) in task.subtasks().iter().enumerate() {
                 let mut new_index = index.clone();
                 new_index.push(i);
                 result.push((new_index, subtask));
@@ -270,12 +382,14 @@ impl Context {
     }
 
     // Plan access
+    /// Gets the plan
     pub fn get_plan(&self) -> &Plan {
         &self.plan
     }
 
-    pub fn get_plan_mut(&mut self) -> &mut Plan {
-        &mut self.plan
+    /// Gets the current task with history
+    pub fn get_current_with_history(&self) -> Option<(Level, Task, Vec<String>)> {
+        self.plan.get_with_history(self.cursor.clone())
     }
 }
 
@@ -304,15 +418,33 @@ impl Core {
         }
     }
 
+    // Helper method to safely access context and notify observers about state changes
+    fn with_context<F, R>(&self, f: F) -> R
+    where
+        F: FnOnce(&mut Context) -> R,
+    {
+        // Get context from mutex
+        let mut context = match self.inner.lock() {
+            Ok(guard) => guard,
+            Err(poisoned) => poisoned.into_inner(),
+        };
+
+        // Apply the function to context
+        let result = f(&mut context);
+
+        // Notify observers about state changes
+        let _ = self.update_tx.send(());
+
+        result
+    }
+
     pub fn get_plan(&self) -> Option<Plan> {
-        match self.inner.lock() {
-            Ok(guard) => Some(guard.get_plan().clone()),
-            Err(poisoned) => {
-                // Recover from a poisoned mutex by getting the guard anyway
-                let guard = poisoned.into_inner();
-                Some(guard.get_plan().clone())
-            }
-        }
+        let context = match self.inner.lock() {
+            Ok(guard) => guard,
+            Err(poisoned) => poisoned.into_inner(),
+        };
+
+        Some(context.get_plan().clone())
     }
 
     pub fn current(&self) -> Option<Current> {
@@ -321,60 +453,30 @@ impl Core {
             Err(poisoned) => poisoned.into_inner(),
         };
 
-        let index = context.get_current_index();
-        if let Some((level, task, history)) = context.plan.get_with_history(index.clone()) {
-            Some(Current {
-                index: index.clone(),
+        let index = context.get_current_index().clone();
+        context
+            .get_current_with_history()
+            .map(|(level, task, history)| Current {
+                index,
                 level,
                 task,
                 history,
             })
-        } else {
-            None
-        }
     }
 
     pub fn add_task(&self, description: String) -> Option<Index> {
-        let mut context = match self.inner.lock() {
-            Ok(guard) => guard,
-            Err(poisoned) => poisoned.into_inner(),
-        };
-
-        let result = context.add_task(description);
-
-        // Notify all observers about the state change
-        let _ = self.update_tx.send(());
-
-        Some(result)
+        self.with_context(|context| Some(context.add_task(description)))
     }
 
     pub fn complete_task(&self) -> bool {
-        let mut context = match self.inner.lock() {
-            Ok(guard) => guard,
-            Err(poisoned) => poisoned.into_inner(),
-        };
-
-        let index = context.get_current_index().clone();
-        let result = context.complete_task(index.clone());
-
-        // Notify all observers about the state change
-        let _ = self.update_tx.send(());
-
-        result
+        self.with_context(|context| {
+            let index = context.get_current_index().clone();
+            context.complete_task(index)
+        })
     }
 
     pub fn move_to(&self, index: Index) -> Option<String> {
-        let mut context = match self.inner.lock() {
-            Ok(guard) => guard,
-            Err(poisoned) => poisoned.into_inner(),
-        };
-
-        let result = context.move_to(index.clone());
-
-        // Notify all observers about the state change
-        let _ = self.update_tx.send(());
-
-        result
+        self.with_context(|context| context.move_to(index))
     }
 
     // Subscribe to state updates
@@ -384,76 +486,13 @@ impl Core {
 
     /// Changes the level of a task at the given index
     pub fn change_level(&self, index: Index, level_index: usize) -> Result<(), String> {
-        let mut context = match self.inner.lock() {
-            Ok(guard) => guard,
-            Err(poisoned) => poisoned.into_inner(),
-        };
-
-        // Validate: the level must exist
-        if level_index >= context.plan.levels.len() {
-            return Err(format!("Level index {} is out of bounds", level_index));
-        }
-
-        // Validate parent-child level relationship
-        if !index.is_empty() {
-            // This isn't the root task, so check parent level
-            let parent_index = index[0..index.len() - 1].to_vec();
-            if let Some(parent) = context.get_task(parent_index.clone()) {
-                let parent_level = parent.level_index.unwrap_or(parent_index.len());
-                if level_index > parent_level {
-                    return Err(format!(
-                        "Child task cannot have a higher abstraction level ({}) than its parent ({})",
-                        level_index, parent_level
-                    ));
-                }
-            }
-        }
-
-        // Define a recursive function to check all child levels
-        fn check_children(task: &Task, depth: usize, max_level: usize) -> Result<(), String> {
-            for subtask in &task.subtasks {
-                let subtask_level = subtask.level_index.unwrap_or(depth + 1);
-                if subtask_level > max_level {
-                    return Err(format!(
-                        "Cannot set level to {} because a child task has a higher level ({})",
-                        max_level, subtask_level
-                    ));
-                }
-
-                // Recursively check this subtask's children
-                if let Err(e) = check_children(subtask, depth + 1, max_level) {
-                    return Err(e);
-                }
-            }
-            Ok(())
-        }
-
-        // Validate that no child has a higher level
-        if let Some(task) = context.get_task(index.clone()) {
-            if let Err(e) = check_children(task, index.len(), level_index) {
-                return Err(e);
-            }
-        }
-
-        // Apply the change
-        if let Some(task) = context.get_task_mut(index) {
-            // Set the level
-            task.set_level(level_index);
-
-            // Notify observers about the state change
-            let _ = self.update_tx.send(());
-
-            Ok(())
-        } else {
-            Err("Task not found".to_string())
-        }
+        self.with_context(|context| context.change_level(index, level_index))
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::levels::ordering_level;
 
     #[test]
     fn test_task_creation_and_navigation() {
@@ -510,11 +549,11 @@ mod tests {
 
         // Verify the task is completed
         let task = context.get_task(task1_index).unwrap();
-        assert!(task.completed);
+        assert!(task.is_completed());
 
         // Verify the other task is not completed
         let task = context.get_task(task2_index).unwrap();
-        assert!(!task.completed);
+        assert!(!task.is_completed());
     }
 
     #[test]
@@ -591,18 +630,18 @@ mod tests {
         assert_eq!(subtask1_index, vec![0, 0, 0]);
 
         // Test getting history for the subtask
-        let history = context
-            .plan
-            .get_with_history(subtask1_index.clone())
-            .unwrap();
-        let (level, task, task_history) = history;
+        context.move_to(subtask1_index.clone()).unwrap();
+        let (level, task, task_history) = context.get_current_with_history().unwrap();
 
-        // Verify the level is correct (3rd level is ordering)
-        assert_eq!(level.description, ordering_level().description);
-        assert_eq!(level.abstraction_focus, ordering_level().abstraction_focus);
+        // Verify the level is correct (we're at depth 3, so using isolation level)
+        assert_eq!(level.description(), default_levels()[2].description());
+        assert_eq!(
+            level.abstraction_focus(),
+            default_levels()[2].abstraction_focus()
+        );
 
         // Verify the task is correct
-        assert_eq!(task.description, "Subtask 1");
+        assert_eq!(task.description(), "Subtask 1");
 
         // Verify the history is correct
         assert_eq!(task_history.len(), 3);
@@ -657,5 +696,63 @@ mod tests {
 
         let result = parse_index("a,b,c");
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_change_level() {
+        // Create a plan with default levels
+        let plan = Plan::new(default_levels());
+        let mut context = Context::new(plan);
+
+        // Add a task at the root level
+        let task_index = context.add_task("Task 1".to_string());
+
+        // Change the level
+        let result = context.change_level(task_index.clone(), 0);
+        assert!(result.is_ok());
+
+        // Verify the level was changed
+        let task = context.get_task(task_index).unwrap();
+        assert_eq!(task.level_index(), Some(0));
+    }
+
+    #[test]
+    fn test_core_with_context() {
+        // Create a plan with default levels
+        let plan = Plan::new(default_levels());
+        let context = Context::new(plan);
+        let core = Core::new(context);
+
+        // Use add_task through Core
+        let task_index = core.add_task("Task through Core".to_string()).unwrap();
+
+        // Move to the task
+        let result = core.move_to(task_index.clone());
+        assert_eq!(result, Some("Task through Core".to_string()));
+
+        // Complete the task
+        assert!(core.complete_task());
+
+        // Verify task is completed via Current
+        let current = core.current().unwrap();
+        assert!(current.task.is_completed());
+    }
+
+    #[test]
+    fn test_task_accessors() {
+        let task = Task::new("Test Task".to_string());
+
+        assert_eq!(task.description(), "Test Task");
+        assert!(!task.is_completed());
+        assert!(task.subtasks().is_empty());
+        assert_eq!(task.level_index(), None);
+    }
+
+    #[test]
+    fn test_plan_accessors() {
+        let plan = Plan::new(default_levels());
+
+        assert_eq!(plan.levels().len(), 4);
+        assert_eq!(plan.level_count(), 4);
     }
 }

@@ -190,17 +190,19 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
             match client.get_current().await {
                 Ok(current) => {
                     println!("Current Task:");
-                    println!("  Description: {}", current.task.description);
-                    println!("  Completed: {}", current.task.completed);
-                    println!("  Level: {}", current.level.description);
+                    println!("  Description: {}", current.task.description());
+                    println!("  Completed: {}", current.task.is_completed());
+                    println!("  Level: {}", current.level.description());
                     println!("  Index: {:?}", current.index);
 
-                    if !current.task.subtasks.is_empty() {
+                    if !current.task.subtasks().is_empty() {
                         println!("\nSubtasks:");
-                        for (i, subtask) in current.task.subtasks.iter().enumerate() {
+                        for (i, subtask) in current.task.subtasks().iter().enumerate() {
                             println!(
                                 "  {}. {} (completed: {})",
-                                i, subtask.description, subtask.completed
+                                i,
+                                subtask.description(),
+                                subtask.is_completed()
                             );
                         }
                     }
@@ -240,20 +242,20 @@ fn create_client(server_url: &str) -> Client {
 
 fn print_plan(plan: &crate::models::Plan) {
     println!("Scatterbrain Plan:");
-    println!("Levels: {}", plan.levels.len());
+    println!("Levels: {}", plan.levels().len());
 
     println!("\nRoot Tasks:");
-    if plan.root.subtasks.is_empty() {
+    if plan.root().subtasks().is_empty() {
         println!("  No tasks yet. Add some with 'scatterbrain task add'");
     } else {
         // Recursively print the task tree
-        for (i, task) in plan.root.subtasks.iter().enumerate() {
+        for (i, task) in plan.root().subtasks().iter().enumerate() {
             print_task(task, vec![i]);
         }
     }
 
     println!("\nAvailable Levels:");
-    for (i, level) in plan.levels.iter().enumerate() {
+    for (i, level) in plan.levels().iter().enumerate() {
         println!("  {}. {}", i + 1, level.get_guidance());
     }
 }
@@ -272,12 +274,15 @@ fn print_task(task: &crate::models::Task, index: Vec<usize>) {
 
     // Print the current task
     println!(
-        "{}{}. {} (completed: {})",
-        indent, index_str, task.description, task.completed
+        "{}[{}] {} (completed: {})",
+        indent,
+        index_str,
+        task.description(),
+        task.is_completed()
     );
 
     // Recursively print subtasks
-    for (i, subtask) in task.subtasks.iter().enumerate() {
+    for (i, subtask) in task.subtasks().iter().enumerate() {
         let mut subtask_index = index.clone();
         subtask_index.push(i);
         print_task(subtask, subtask_index);

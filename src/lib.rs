@@ -13,7 +13,5 @@ pub mod models;
 // Re-export the most commonly used types
 pub use api::serve;
 pub use cli::run;
-pub use levels::{
-    default_levels, implementation_level, isolation_level, ordering_level, plan_level, Level,
-};
+pub use levels::{default_levels, Level};
 pub use models::{Context, Core, Plan, Task};

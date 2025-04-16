@@ -7,12 +7,21 @@ use serde::{Deserialize, Serialize};
 /// Represents an abstraction level for the LLM to work through
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Level {
-    pub description: String,
-    pub questions: Vec<String>,
-    pub abstraction_focus: String,
+    description: String,
+    questions: Vec<String>,
+    abstraction_focus: String,
 }
 
 impl Level {
+    /// Creates a new level
+    pub fn new(description: String, questions: Vec<String>, abstraction_focus: String) -> Self {
+        Self {
+            description,
+            questions,
+            abstraction_focus,
+        }
+    }
+
     /// Returns a string that guides agents on how to effectively use this abstraction level
     pub fn get_guidance(&self) -> String {
         format!(
@@ -25,6 +34,21 @@ impl Level {
                 .collect::<Vec<_>>()
                 .join("\n")
         )
+    }
+
+    /// Gets the description of this level
+    pub fn description(&self) -> &str {
+        &self.description
+    }
+
+    /// Gets the questions for this level
+    pub fn questions(&self) -> &[String] {
+        &self.questions
+    }
+
+    /// Gets the abstraction focus for this level
+    pub fn abstraction_focus(&self) -> &str {
+        &self.abstraction_focus
     }
 }
 

@@ -307,18 +307,18 @@ fn render_ui_template(
     html.push_str("<div class='level-legend'>");
     html.push_str("<h3>Abstraction Levels</h3>");
 
-    for (i, level) in plan.levels.iter().enumerate() {
+    for (i, level) in plan.levels().iter().enumerate() {
         html.push_str(&format!(
             "<div class='level-item'><span class='task-level level-{}'>{}</span>",
             i, i
         ));
         html.push_str(&format!(
             "<div class='level-description'><strong>{}</strong>",
-            level.description
+            level.description()
         ));
         html.push_str(&format!(
             "<div class='level-focus'>{}</div></div></div>",
-            level.abstraction_focus
+            level.abstraction_focus()
         ));
     }
     html.push_str("</div>");
@@ -328,7 +328,13 @@ fn render_ui_template(
     html.push_str("<h2>Plan</h2>");
 
     // Render tasks hierarchically
-    render_tasks_html(&mut html, &plan.root.subtasks, current, plan, Vec::new());
+    render_tasks_html(
+        &mut html,
+        &plan.root().subtasks(),
+        current,
+        plan,
+        Vec::new(),
+    );
 
     html.push_str("</div>");
 
@@ -338,11 +344,11 @@ fn render_ui_template(
         html.push_str("<h2>Current Task</h2>");
         html.push_str(&format!(
             "<div class='current-task'><h3>{}</h3>",
-            curr.task.description
+            curr.task.description()
         ));
         html.push_str(&format!(
             "<p><strong>Status:</strong> {}</p>",
-            if curr.task.completed {
+            if curr.task.is_completed() {
                 "Completed"
             } else {
                 "In Progress"
@@ -350,8 +356,8 @@ fn render_ui_template(
         ));
         html.push_str(&format!(
             "<p><strong>Level:</strong> {} - {}</p>",
-            curr.task.level_index.unwrap_or(curr.index.len() - 1),
-            curr.level.description
+            curr.task.level_index().unwrap_or(curr.index.len() - 1),
+            curr.level.description()
         ));
         html.push_str(&format!(
             "<p><strong>Index:</strong> {}</p>",
@@ -363,19 +369,20 @@ fn render_ui_template(
         ));
 
         // Show subtasks if any
-        if !curr.task.subtasks.is_empty() {
+        if !curr.task.subtasks().is_empty() {
             html.push_str("<div class='subtasks'>");
             html.push_str("<h4>Subtasks:</h4>");
             html.push_str("<ul>");
-            for subtask in &curr.task.subtasks {
-                let status_class = if subtask.completed {
+            for subtask in curr.task.subtasks() {
+                let status_class = if subtask.is_completed() {
                     "completed"
                 } else {
                     "pending"
                 };
                 html.push_str(&format!(
                     "<li class='{}'>{}</li>",
-                    status_class, subtask.description
+                    status_class,
+                    subtask.description()
                 ));
             }
             html.push_str("</ul>");
@@ -415,15 +422,15 @@ fn render_tasks_html(
         };
 
         // Determine the effective level (explicit or derived from position)
-        let level_idx = task.level_index.unwrap_or(current_path.len());
+        let level_idx = task.level_index().unwrap_or(current_path.len());
 
         let class = if is_current {
-            if task.completed {
+            if task.is_completed() {
                 "current completed"
             } else {
                 "current"
             }
-        } else if task.completed {
+        } else if task.is_completed() {
             "completed"
         } else {
             ""
@@ -450,18 +457,18 @@ fn render_tasks_html(
         // Task description
         html.push_str(&format!(
             "<span class='task-desc'>{}</span>",
-            task.description
+            task.description()
         ));
 
         // Task status
         html.push_str(&format!(
             "<span class='task-status'>{}</span></div>",
-            if task.completed { "✓" } else { "○" }
+            if task.is_completed() { "✓" } else { "○" }
         ));
 
         // Render subtasks recursively
-        if !task.subtasks.is_empty() {
-            render_tasks_html(html, &task.subtasks, current, plan, current_path);
+        if !task.subtasks().is_empty() {
+            render_tasks_html(html, task.subtasks(), current, plan, current_path);
         }
 
         html.push_str("</li>");
