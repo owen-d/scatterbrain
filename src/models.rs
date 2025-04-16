@@ -359,7 +359,6 @@ pub struct Current {
     pub level: Level,
     pub task: Task,
     pub history: Vec<String>,
-    pub abstraction_guidance: Option<String>,
 }
 
 #[derive(Clone)]
@@ -398,14 +397,11 @@ impl Core {
 
         let index = context.get_current_index();
         if let Some((level, task, history)) = context.plan.get_with_history(index.clone()) {
-            let abstraction_guidance = context.get_current_level_with_guidance();
-
             Some(Current {
                 index: index.clone(),
                 level,
                 task,
                 history,
-                abstraction_guidance,
             })
         } else {
             None
