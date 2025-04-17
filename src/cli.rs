@@ -407,20 +407,44 @@ HELP:
 /// Creates an example task tree for UI testing
 fn create_example_tasks(context: &mut Context) {
     // Create some top-level tasks
-    let project_index = context.add_task("Build Web Application".to_string());
-    let docs_index = context.add_task("Write Documentation".to_string());
-    let test_index = context.add_task("Test Application".to_string());
+    let project_index = context
+        .add_task("Build Web Application".to_string())
+        .into_inner()
+        .1;
+    let docs_index = context
+        .add_task("Write Documentation".to_string())
+        .into_inner()
+        .1;
+    let test_index = context
+        .add_task("Test Application".to_string())
+        .into_inner()
+        .1;
 
     // Add subtasks to the project
     context.move_to(project_index.clone()).unwrap();
-    let frontend_index = context.add_task("Implement Frontend".to_string());
-    let backend_index = context.add_task("Implement Backend".to_string());
-    let _db_index = context.add_task("Set up Database".to_string());
+    let frontend_index = context
+        .add_task("Implement Frontend".to_string())
+        .into_inner()
+        .1;
+    let backend_index = context
+        .add_task("Implement Backend".to_string())
+        .into_inner()
+        .1;
+    let _db_index = context
+        .add_task("Set up Database".to_string())
+        .into_inner()
+        .1;
 
     // Add subtasks to frontend
     context.move_to(frontend_index.clone()).unwrap();
-    let ui_index = context.add_task("Design UI Components".to_string());
-    let _auth_ui_index = context.add_task("Implement User Authentication UI".to_string());
+    let ui_index = context
+        .add_task("Design UI Components".to_string())
+        .into_inner()
+        .1;
+    let _auth_ui_index = context
+        .add_task("Implement User Authentication UI".to_string())
+        .into_inner()
+        .1;
     context.add_task("Create Dashboard View".to_string());
 
     // Mark UI task as completed
@@ -429,13 +453,19 @@ fn create_example_tasks(context: &mut Context) {
     // Add subtasks to backend
     context.move_to(backend_index.clone()).unwrap();
     context.add_task("Set up API Routes".to_string());
-    let auth_logic_index = context.add_task("Implement Authentication Logic".to_string());
-    let data_index = context.add_task("Create Data Models".to_string());
+    let auth_logic_index = context
+        .add_task("Implement Authentication Logic".to_string())
+        .into_inner()
+        .1;
+    let data_index = context
+        .add_task("Create Data Models".to_string())
+        .into_inner()
+        .1;
 
     // Add subtasks to data models
     context.move_to(data_index.clone()).unwrap();
     context.add_task("User Model".to_string());
-    let _product_index = context.add_task("Product Model".to_string());
+    let _product_index = context.add_task("Product Model".to_string()).into_inner().1;
     context.add_task("Order Model".to_string());
 
     // Add subtasks to documentation

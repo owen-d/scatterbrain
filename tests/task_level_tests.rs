@@ -25,7 +25,7 @@ fn test_task_change_level() {
     let mut context = Context::new(plan);
 
     // Add a task and change its level
-    let task_index = context.add_task("Task 1".to_string());
+    let task_index = context.add_task("Task 1".to_string()).into_inner().1;
     // Lower level (higher abstraction) is valid
     context.change_level(task_index.clone(), 0).unwrap();
 
@@ -50,19 +50,19 @@ fn test_context_get_current_with_history() {
     let mut context = Context::new(plan);
 
     // Add a root task with level 0
-    let task0_index = context.add_task("Root Task".to_string());
+    let task0_index = context.add_task("Root Task".to_string()).into_inner().1;
 
     // Move to root task 0
     context.move_to(task0_index.clone()).unwrap();
 
     // Add a first task as a child with level 1
-    let task1_index = context.add_task("Task 1".to_string());
+    let task1_index = context.add_task("Task 1".to_string()).into_inner().1;
 
     // Move to first task
     context.move_to(task1_index.clone()).unwrap();
 
     // Add a second task as a child with level 2
-    let task2_index = context.add_task("Task 2".to_string());
+    let task2_index = context.add_task("Task 2".to_string()).into_inner().1;
 
     // Move to second task
     context.move_to(task2_index.clone()).unwrap();
@@ -89,8 +89,8 @@ fn test_task_completion() {
     let mut context = Context::new(plan);
 
     // Add tasks
-    let task1_index = context.add_task("Task 1".to_string());
-    let task2_index = context.add_task("Task 2".to_string());
+    let task1_index = context.add_task("Task 1".to_string()).into_inner().1;
+    let task2_index = context.add_task("Task 2".to_string()).into_inner().1;
 
     // Complete task 1
     context.complete_task(task1_index.clone());
@@ -114,7 +114,8 @@ fn test_core_functionality() {
     let core = Core::new(context);
 
     // Add a task
-    let task_index = core.add_task("Task via Core".to_string()).unwrap();
+    let response = core.add_task("Task via Core".to_string());
+    let task_index = response.into_inner().unwrap().1;
 
     // Move to the task
     core.move_to(task_index.clone()).unwrap();
@@ -148,7 +149,7 @@ fn test_level_validation() {
     let mut context = Context::new(plan);
 
     // Add a root task
-    let root_index = context.add_task("Root Task".to_string());
+    let root_index = context.add_task("Root Task".to_string()).into_inner().1;
 
     // Set root task to level 0
     let result = context.change_level(root_index.clone(), 0);
@@ -156,7 +157,7 @@ fn test_level_validation() {
 
     // Move to root task and add a child
     context.move_to(root_index.clone()).unwrap();
-    let child_index = context.add_task("Child Task".to_string());
+    let child_index = context.add_task("Child Task".to_string()).into_inner().1;
 
     // Child task should accept level 0 (same as parent)
     let result = context.change_level(child_index.clone(), 0);

@@ -118,10 +118,17 @@ impl Client {
         let url = format!("{}/api/task", self.config.base_url);
         let request = AddTaskRequest { description };
         let response = self.http_client.post(&url).json(&request).send().await?;
-        let api_response: ApiResponse<Index> = response.json().await?;
+        let api_response: ApiResponse<models::PlanResponse<Option<(models::Task, Index)>>> =
+            response.json().await?;
 
         if api_response.success {
-            api_response.data.ok_or(ClientError::MissingData)
+            match api_response.data {
+                Some(plan_response) => match plan_response.into_inner() {
+                    Some((_, index)) => Ok(index),
+                    None => Err(ClientError::MissingData),
+                },
+                None => Err(ClientError::MissingData),
+            }
         } else {
             Err(ClientError::Api(
                 api_response

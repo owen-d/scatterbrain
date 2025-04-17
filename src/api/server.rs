@@ -19,6 +19,7 @@ use serde::{Deserialize, Serialize};
 use tokio::net::TcpListener;
 use tower_http::cors::{Any, CorsLayer};
 
+use crate::models::PlanResponse;
 use crate::models::{self, Index};
 use crate::Core;
 
@@ -146,13 +147,17 @@ async fn add_task(
     State(core): State<Core>,
     Json(payload): Json<AddTaskRequest>,
 ) -> impl IntoResponse {
-    match core.add_task(payload.description) {
-        Some(index) => Json(ApiResponse::success(index)).into_response(),
+    let response = core.add_task(payload.description);
+
+    match response.inner() {
+        Some(_) => Json(ApiResponse::success(response)).into_response(),
         None => (
             StatusCode::INTERNAL_SERVER_ERROR,
-            Json(ApiResponse::<Index>::error(
-                "Failed to add task".to_string(),
-            )),
+            Json(
+                ApiResponse::<PlanResponse<Option<(models::Task, Index)>>>::error(
+                    "Failed to add task".to_string(),
+                ),
+            ),
         )
             .into_response(),
     }
