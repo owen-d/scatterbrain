@@ -538,6 +538,143 @@ impl Context {
     pub fn get_current_with_history(&self) -> Option<(Level, Task, Vec<String>)> {
         self.plan.get_with_history(self.cursor.clone())
     }
+
+    /// Builds a task tree from the root to the current task with one level of children at each node
+    fn build_task_tree(&self) -> Vec<TaskTreeNode> {
+        // Start with root and include all tasks along the path to the current task
+        // plus immediate children of the current task
+        let current_idx = Vec::new();
+
+        // First, add the root (which is not actually shown to users but is the parent of top-level tasks)
+        let root_children = self
+            .get_subtasks(current_idx.clone())
+            .into_iter()
+            .map(|(idx, task)| {
+                // Check if this child is on the path to the current task
+                let is_on_path = !self.cursor.is_empty() && self.cursor[0] == idx[0];
+
+                // Only include children for tasks on the path to current
+                let children = if is_on_path {
+                    self.get_subtasks(idx.clone())
+                        .into_iter()
+                        .map(|(child_idx, child_task)| {
+                            // For deeper levels, recursively check if on path
+                            let is_on_deeper_path = self.cursor.len() > 1
+                                && child_idx.len() <= self.cursor.len()
+                                && child_idx == self.cursor[0..child_idx.len()];
+
+                            TaskTreeNode {
+                                description: child_task.description().to_string(),
+                                index: child_idx.clone(),
+                                completed: child_task.is_completed(),
+                                is_current: child_idx == self.cursor,
+                                children: if is_on_deeper_path {
+                                    self.build_subtree(&child_idx)
+                                } else {
+                                    Vec::new()
+                                },
+                            }
+                        })
+                        .collect()
+                } else {
+                    Vec::new()
+                };
+
+                TaskTreeNode {
+                    description: task.description().to_string(),
+                    index: idx.clone(),
+                    completed: task.is_completed(),
+                    is_current: idx == self.cursor,
+                    children,
+                }
+            })
+            .collect();
+
+        // Add the current task's children if we're at a valid task
+        if let Some(_current_task) = self.get_current_task() {
+            if !self.cursor.is_empty() {
+                // If we're at a valid task, the children were already added above
+                return root_children;
+            }
+        }
+
+        // If we're at root, just return the root's children
+        root_children
+    }
+
+    /// Helper method to build a subtree for a given index
+    fn build_subtree(&self, index: &Index) -> Vec<TaskTreeNode> {
+        // Get all subtasks for this index
+        self.get_subtasks(index.clone())
+            .into_iter()
+            .map(|(idx, task)| {
+                // Check if this is on the path to current task
+                let is_on_path = idx.len() <= self.cursor.len() && idx == self.cursor[0..idx.len()];
+
+                TaskTreeNode {
+                    description: task.description().to_string(),
+                    index: idx.clone(),
+                    completed: task.is_completed(),
+                    is_current: idx == self.cursor,
+                    children: if is_on_path {
+                        self.build_subtree(&idx)
+                    } else {
+                        Vec::new()
+                    },
+                }
+            })
+            .collect()
+    }
+
+    /// Creates a distilled context with focused information about the current planning state
+    pub fn distilled_context(&self) -> PlanResponse<DistilledContext> {
+        // Create the usage summary
+        let usage_summary = "Scatterbrain is a hierarchical planning tool that helps break down complex tasks into manageable pieces. Use 'task add' to add tasks, 'move <index>' to navigate, and 'task complete' to mark tasks as done. Tasks are organized in levels from high-level planning to specific implementation details.".to_string();
+
+        // Build the task tree from root to current, with one level of children
+        let task_tree = self.build_task_tree();
+
+        // Get the current task and level if we're at a valid position
+        let (current_level, current_task_opt) = if !self.cursor.is_empty() {
+            if let Some((level, task, _)) = self.get_current_with_history() {
+                (Some(level), Some(task))
+            } else {
+                (None, None)
+            }
+        } else {
+            // At root level
+            self.plan
+                .levels()
+                .first()
+                .cloned()
+                .map(|level| (Some(level), None))
+                .unwrap_or((None, None))
+        };
+
+        // Create followup suggestions based on current context
+        let followups = if current_task_opt.is_some() {
+            vec![
+                "add a subtask".to_string(),
+                "complete this task".to_string(),
+                "view the plan".to_string(),
+            ]
+        } else {
+            vec!["add a task".to_string(), "view the plan".to_string()]
+        };
+
+        // Create a reminder about the distilled context
+        let reminder = Some("Use this distilled context to maintain awareness of your current focus and the overall structure of your plan.".to_string());
+
+        // Create the distilled context with all components
+        let distilled = DistilledContext {
+            usage_summary,
+            task_tree,
+            current_task: current_task_opt,
+            current_level,
+        };
+
+        PlanResponse::new(distilled, followups, reminder)
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -575,6 +712,34 @@ pub struct Current {
     pub level: Level,
     pub task: Task,
     pub history: Vec<String>,
+}
+
+/// Distilled context containing focused information about the current planning state
+#[derive(Clone, Serialize, Deserialize)]
+pub struct DistilledContext {
+    /// A summary of what scatterbrain is and how to use it
+    pub usage_summary: String,
+    /// The task tree from root to the current node, plus one level of children
+    pub task_tree: Vec<TaskTreeNode>,
+    /// The current task
+    pub current_task: Option<Task>,
+    /// The current level information
+    pub current_level: Option<Level>,
+}
+
+/// A node in the task tree for the distilled context
+#[derive(Clone, Serialize, Deserialize)]
+pub struct TaskTreeNode {
+    /// The description of the task
+    pub description: String,
+    /// The index path to this task
+    pub index: Index,
+    /// Whether this task is completed
+    pub completed: bool,
+    /// Whether this is the current task
+    pub is_current: bool,
+    /// Child tasks (only included for the current task and its ancestors)
+    pub children: Vec<TaskTreeNode>,
 }
 
 #[derive(Clone)]
@@ -689,6 +854,11 @@ impl Core {
 
     pub fn get_current_index(&self) -> PlanResponse<Index> {
         self.with_context(|context| context.get_current_index())
+    }
+
+    /// Gets a distilled context with focused information about the current planning state
+    pub fn distilled_context(&self) -> PlanResponse<DistilledContext> {
+        self.with_context(|context| context.distilled_context())
     }
 }
 

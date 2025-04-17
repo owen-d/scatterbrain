@@ -8,7 +8,10 @@ use std::io;
 
 use crate::{
     api::{serve, Client, ClientConfig, ClientError, ServerConfig},
-    models::{default_levels, parse_index, Context, Core, Plan},
+    models::{
+        default_levels, parse_index, Context, Core, DistilledContext, Plan, PlanResponse,
+        TaskTreeNode,
+    },
 };
 
 #[derive(Parser)]
@@ -52,6 +55,9 @@ enum Commands {
 
     /// Get the current task
     Current,
+
+    /// Get a distilled context of the current planning state
+    Distilled,
 
     /// Interactive guide on how to use this tool
     Guide,
@@ -250,6 +256,14 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
                 }
                 Err(e) => Err(e.into()),
             }
+        }
+
+        Commands::Distilled => {
+            let client = create_client(&cli.server);
+
+            let distilled_response = client.get_distilled_context().await?;
+            print_distilled_context_response(&distilled_response);
+            Ok(())
         }
 
         Commands::Guide => {
@@ -551,4 +565,75 @@ fn create_example_tasks(context: &mut Context) {
     // This will highlight the auth logic task in the backend section
     let move_response = context.move_to(auth_logic_index);
     assert!(move_response.inner().is_some());
+}
+
+fn print_distilled_context_response(response: &PlanResponse<DistilledContext>) {
+    let context = response.inner();
+
+    println!("\n=== DISTILLED CONTEXT ===\n");
+
+    // Print usage summary
+    println!("USAGE SUMMARY:");
+    println!("{}", context.usage_summary);
+    println!("");
+
+    // Print current task and level
+    println!("CURRENT POSITION:");
+    if let Some(task) = &context.current_task {
+        println!("  Current task: \"{}\"", task.description());
+        println!(
+            "  Completed: {}",
+            if task.is_completed() { "Yes" } else { "No" }
+        );
+    } else {
+        println!("  At root level (no task selected)");
+    }
+
+    if let Some(level) = &context.current_level {
+        println!("  Current abstraction level: {}", level.description());
+        println!("  Focus: {}", level.abstraction_focus());
+    }
+    println!("");
+
+    // Print task tree
+    println!("TASK TREE:");
+    print_task_tree(&context.task_tree, 0);
+
+    // Print followups and reminder
+    if !response.suggested_followups.is_empty() {
+        println!("\nSuggested next steps:");
+        for followup in &response.suggested_followups {
+            println!("  • {}", followup);
+        }
+    }
+
+    if let Some(reminder) = &response.reminder {
+        println!("\nReminder: {}", reminder);
+    }
+
+    println!("");
+}
+
+fn print_task_tree(nodes: &[TaskTreeNode], indent: usize) {
+    for node in nodes {
+        // Create indentation
+        let indent_str = "  ".repeat(indent);
+
+        // Create indicator for current task
+        let current_indicator = if node.is_current { "→ " } else { "  " };
+
+        // Create completion status
+        let completion_status = if node.completed { "[✓]" } else { "[ ]" };
+
+        // Print the task with appropriate formatting
+        println!(
+            "{}{}{}{}",
+            indent_str, current_indicator, completion_status, node.description
+        );
+
+        // Recursively print children with increased indentation
+        if !node.children.is_empty() {
+            print_task_tree(&node.children, indent + 1);
+        }
+    }
 }

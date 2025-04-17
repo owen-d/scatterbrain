@@ -20,7 +20,7 @@ use tokio::net::TcpListener;
 use tower_http::cors::{Any, CorsLayer};
 
 use crate::models::PlanResponse;
-use crate::models::{self, Index};
+use crate::models::{self, DistilledContext, Index};
 use crate::Core;
 
 /// Request to add a new task
@@ -101,6 +101,7 @@ pub async fn serve(core: Core, config: ServerConfig) -> Result<(), Box<dyn std::
     let app = Router::new()
         .route("/api/plan", get(get_plan))
         .route("/api/current", get(get_current))
+        .route("/api/distilled", get(get_distilled_context))
         .route("/api/task", post(add_task))
         .route("/api/task/complete", post(complete_task))
         .route("/api/task/level", post(change_level))
@@ -126,6 +127,11 @@ async fn get_plan(State(core): State<Core>) -> JSONResp<Option<models::Plan>> {
 
 async fn get_current(State(core): State<Core>) -> JSONResp<Option<models::Current>> {
     let response = core.current();
+    Json(ApiResponse::success(response))
+}
+
+async fn get_distilled_context(State(core): State<Core>) -> JSONResp<DistilledContext> {
+    let response = core.distilled_context();
     Json(ApiResponse::success(response))
 }
 

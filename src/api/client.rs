@@ -8,7 +8,7 @@ use reqwest::{Client as ReqwestClient, Error as ReqwestError};
 use serde::Deserialize;
 
 use crate::models;
-use crate::models::Index;
+use crate::models::{parse_index, DistilledContext, Index, PlanResponse};
 
 use super::server::{AddTaskRequest, ChangeLevelRequest, MoveToRequest};
 
@@ -116,6 +116,37 @@ impl Client {
         }
 
         let api_response: ApiResponse<models::PlanResponse<Option<models::Current>>> =
+            response.json().await?;
+
+        if api_response.success {
+            match api_response.data {
+                Some(plan_response) => Ok(plan_response),
+                None => Err(ClientError::MissingData),
+            }
+        } else {
+            Err(ClientError::Api(
+                api_response
+                    .error
+                    .unwrap_or_else(|| "Unknown API error".to_string()),
+            ))
+        }
+    }
+
+    /// Get the distilled context
+    pub async fn get_distilled_context(
+        &self,
+    ) -> Result<models::PlanResponse<DistilledContext>, ClientError> {
+        let url = format!("{}/api/distilled", self.config.base_url);
+        let response = self.http_client.get(&url).send().await?;
+
+        if !response.status().is_success() {
+            return Err(ClientError::Api(format!(
+                "HTTP error: {}",
+                response.status()
+            )));
+        }
+
+        let api_response: ApiResponse<models::PlanResponse<DistilledContext>> =
             response.json().await?;
 
         if api_response.success {
