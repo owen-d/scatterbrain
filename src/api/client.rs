@@ -72,7 +72,23 @@ impl Client {
     pub async fn get_plan(&self) -> Result<models::PlanResponse<models::Plan>, ClientError> {
         let url = format!("{}/api/plan", self.config.base_url);
         let response = self.http_client.get(&url).send().await?;
-        let api_response: ApiResponse<models::PlanResponse<models::Plan>> = response.json().await?;
+
+        if !response.status().is_success() {
+            return Err(ClientError::Api(format!(
+                "HTTP error: {}",
+                response.status()
+            )));
+        }
+
+        let api_response: ApiResponse<models::PlanResponse<models::Plan>> =
+            match response.json().await {
+                Ok(data) => data,
+                Err(e) => {
+                    // Get the text to debug error
+                    let err_text = format!("JSON parse error: {}. Check model compatibility.", e);
+                    return Err(ClientError::Api(err_text));
+                }
+            };
 
         if api_response.success {
             api_response.data.ok_or(ClientError::MissingData)

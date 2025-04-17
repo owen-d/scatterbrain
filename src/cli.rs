@@ -189,9 +189,6 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
 
             let response = client.move_to(parsed_index).await?;
 
-            // Create a longer-lived binding for the string
-            let unknown_str = "Unknown".to_string();
-
             print_response(&response, |description| {
                 println!(
                     "Moved to task: \"{}\" at index: {}",
