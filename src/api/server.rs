@@ -66,6 +66,8 @@ pub struct ApiResponse<T: Serialize> {
     error: Option<String>,
 }
 
+pub type JSONResp<T> = Json<ApiResponse<PlanResponse<T>>>;
+
 impl<T: Serialize> ApiResponse<T> {
     pub fn success(data: T) -> Self {
         Self {
@@ -117,100 +119,62 @@ pub async fn serve(core: Core, config: ServerConfig) -> Result<(), Box<dyn std::
 }
 
 // Handler implementations
-async fn get_plan(State(core): State<Core>) -> impl IntoResponse {
+async fn get_plan(State(core): State<Core>) -> JSONResp<Option<models::Plan>> {
     let plan_response = core.get_plan();
-
-    match plan_response.inner() {
-        Some(_) => Json(ApiResponse::success(plan_response)).into_response(),
-        None => (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(ApiResponse::<PlanResponse<Option<models::Plan>>>::error(
-                "Failed to access plan data".to_string(),
-            )),
-        )
-            .into_response(),
-    }
+    Json(ApiResponse::success(plan_response))
 }
 
-async fn get_current(State(core): State<Core>) -> impl IntoResponse {
-    match core.current() {
-        Some(current) => Json(ApiResponse::success(current)).into_response(),
-        None => (
-            StatusCode::NOT_FOUND,
-            Json(ApiResponse::<()>::error(
-                "Current task not found".to_string(),
-            )),
-        )
-            .into_response(),
-    }
+async fn get_current(State(core): State<Core>) -> JSONResp<Option<models::Current>> {
+    let response = core.current();
+    Json(ApiResponse::success(response))
 }
 
 async fn add_task(
     State(core): State<Core>,
     Json(payload): Json<AddTaskRequest>,
-) -> impl IntoResponse {
+) -> JSONResp<Option<(models::Task, Index)>> {
     let response = core.add_task(payload.description);
 
     match response.inner() {
-        Some(_) => Json(ApiResponse::success(response)).into_response(),
-        None => (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(
-                ApiResponse::<PlanResponse<Option<(models::Task, Index)>>>::error(
-                    "Failed to add task".to_string(),
-                ),
-            ),
-        )
-            .into_response(),
+        Some(_) => Json(ApiResponse::success(response)),
+        None => Json(ApiResponse::error("Failed to add task".to_string())),
     }
 }
 
-async fn complete_task(State(core): State<Core>) -> impl IntoResponse {
+async fn complete_task(State(core): State<Core>) -> JSONResp<bool> {
     let response = core.complete_task();
-
-    if *response.inner() {
-        Json(ApiResponse::success(response)).into_response()
+    let ok = *response.inner();
+    if ok {
+        Json(ApiResponse::success(response))
     } else {
-        (
-            StatusCode::BAD_REQUEST,
-            Json(ApiResponse::<PlanResponse<bool>>::error(
-                "Failed to complete current task".to_string(),
-            )),
-        )
-            .into_response()
+        Json(ApiResponse::error("Failed to complete task".to_string()))
     }
 }
 
 async fn change_level(
     State(core): State<Core>,
     Json(payload): Json<ChangeLevelRequest>,
-) -> impl IntoResponse {
-    match core.change_level(payload.index, payload.level_index) {
-        Ok(_) => Json(ApiResponse::success(
-            "Level changed successfully".to_string(),
-        ))
-        .into_response(),
-        Err(err) => (
-            StatusCode::BAD_REQUEST,
-            Json(ApiResponse::<String>::error(err)),
-        )
-            .into_response(),
+) -> JSONResp<()> {
+    let response = core.change_level(payload.index, payload.level_index);
+
+    match response.inner().clone() {
+        Ok(_) => Json(ApiResponse::success(response.replace(()))),
+        Err(e) => Json(ApiResponse::error(e)),
     }
 }
 
 async fn move_to(
     State(core): State<Core>,
     Json(payload): Json<MoveToRequest>,
-) -> impl IntoResponse {
-    match core.move_to(payload.index) {
-        Some(description) => Json(ApiResponse::success(description)).into_response(),
-        None => (
-            StatusCode::BAD_REQUEST,
-            Json(ApiResponse::<String>::error(
-                "Failed to move to requested task".to_string(),
-            )),
-        )
-            .into_response(),
+) -> JSONResp<Option<String>> {
+    let response = core.move_to(payload.index);
+
+    if response.inner().is_some() {
+        Json(ApiResponse::success(response))
+    } else {
+        Json(ApiResponse::error(
+            "Failed to move to requested task".to_string(),
+        ))
     }
 }
 
@@ -286,7 +250,8 @@ impl Stream for EventStream {
 // UI handler
 async fn ui_handler(State(core): State<Core>) -> impl IntoResponse {
     let plan_response = core.get_plan();
-    let current_opt = core.current();
+    let current_response = core.current();
+    let current_opt = current_response.inner();
 
     match plan_response.inner() {
         Some(plan) => {

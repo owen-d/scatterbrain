@@ -216,20 +216,50 @@ impl Context {
     }
 
     /// Moves to the task at the given index
-    pub fn move_to(&mut self, index: Index) -> Option<String> {
+    pub fn move_to(&mut self, index: Index) -> PlanResponse<Option<String>> {
         // Validate the index
         if index.is_empty() {
-            self.cursor = index;
-            return Some("root".to_string());
+            self.cursor = Vec::new();
+            return PlanResponse::new(
+                Some("root".to_string()),
+                vec!["add a task".to_string(), "view the plan".to_string()],
+                Some("You're at the root level of your plan".to_string()),
+            );
         }
 
         // Check if the index is valid
-        if let Some(task) = self.get_task(index.clone()) {
+        let task_opt = self.get_task(index.clone());
+        if let Some(task) = task_opt {
             let description = task.description().to_string();
+
+            // Create followup suggestions based on task state
+            let mut followups = vec!["add a subtask".to_string()];
+            if !task.is_completed() {
+                followups.push("complete this task".to_string());
+            }
+            if !task.subtasks().is_empty() {
+                followups.push("move to a subtask".to_string());
+            }
+
+            // Create reminder
+            let reminder = if !task.is_completed() && !task.subtasks().is_empty() {
+                Some("Remember to complete subtasks before marking this task as done".to_string())
+            } else if !task.is_completed() {
+                Some("Focus on this task until it's completed".to_string())
+            } else {
+                Some("This task is already completed".to_string())
+            };
+
+            // Set cursor after we're done with task operations
             self.cursor = index;
-            Some(description)
+
+            PlanResponse::new(Some(description), followups, reminder)
         } else {
-            None
+            PlanResponse::new(
+                None,
+                vec!["view the plan".to_string()],
+                Some("Invalid task index. Try viewing the plan to find a valid task.".to_string()),
+            )
         }
     }
 
@@ -254,10 +284,21 @@ impl Context {
     }
 
     /// Changes the level of a task at the given index
-    pub fn change_level(&mut self, index: Index, level_index: usize) -> Result<(), String> {
+    pub fn change_level(
+        &mut self,
+        index: Index,
+        level_index: usize,
+    ) -> PlanResponse<Result<(), String>> {
         // Validate: the level must exist
         if level_index >= self.plan.level_count() {
-            return Err(format!("Level index {} is out of bounds", level_index));
+            return PlanResponse::new(
+                Err(format!("Level index {} is out of bounds", level_index)),
+                vec!["view the plan".to_string()],
+                Some(format!(
+                    "Available levels are 0-{}",
+                    self.plan.level_count() - 1
+                )),
+            );
         }
 
         // Validate parent-child level relationship
@@ -267,10 +308,14 @@ impl Context {
             if let Some(parent) = self.get_task(parent_index.clone()) {
                 let parent_level = parent.level_index().unwrap_or(parent_index.len());
                 if level_index > parent_level {
-                    return Err(format!(
-                        "Child task cannot have a higher abstraction level ({}) than its parent ({})",
-                        level_index, parent_level
-                    ));
+                    return PlanResponse::new(
+                        Err(format!(
+                            "Child task cannot have a higher abstraction level ({}) than its parent ({})",
+                            level_index, parent_level
+                        )),
+                        vec!["change parent level first".to_string()],
+                        Some("Remember that parent tasks should have equal or higher abstraction levels than their children".to_string()),
+                    );
                 }
             }
         }
@@ -297,7 +342,14 @@ impl Context {
         // Validate that no child has a higher level
         if let Some(task) = self.get_task(index.clone()) {
             if let Err(e) = check_children(task, index.len(), level_index) {
-                return Err(e);
+                return PlanResponse::new(
+                    Err(e),
+                    vec!["change child levels first".to_string()],
+                    Some(
+                        "Change the levels of child tasks before changing the parent task level"
+                            .to_string(),
+                    ),
+                );
             }
         }
 
@@ -305,9 +357,29 @@ impl Context {
         if let Some(task) = self.get_task_mut(index) {
             // Set the level
             task.set_level(level_index);
-            Ok(())
+
+            // Generate followups based on the new level
+            let followup_suggestions = vec![
+                "continue working on this task".to_string(),
+                "move to another task".to_string(),
+            ];
+
+            // Create a level-specific reminder
+            let reminder = match level_index {
+                0 => Some("This is now a high-level strategic task".to_string()),
+                1 => Some("This is now a task focused on component isolation".to_string()),
+                2 => Some("This is now a task focused on ordering and sequence".to_string()),
+                3 => Some("This is now an implementation-level task".to_string()),
+                _ => Some(format!("Task is now at level {}", level_index)),
+            };
+
+            PlanResponse::new(Ok(()), followup_suggestions, reminder)
         } else {
-            Err("Task not found".to_string())
+            PlanResponse::new(
+                Err("Task not found".to_string()),
+                vec!["view the plan".to_string()],
+                Some("Check the plan to find a valid task index".to_string()),
+            )
         }
     }
 
@@ -447,6 +519,10 @@ impl<T> PlanResponse<T> {
     pub fn into_inner(self) -> T {
         self.res
     }
+
+    pub fn replace<B>(self, res: B) -> PlanResponse<B> {
+        PlanResponse::new(res, self.suggested_followups, self.reminder)
+    }
 }
 
 #[derive(Clone, Serialize, Deserialize)]
@@ -508,21 +584,25 @@ impl Core {
         PlanResponse::new(plan, followups, reminder)
     }
 
-    pub fn current(&self) -> Option<Current> {
-        let context = match self.inner.lock() {
-            Ok(guard) => guard,
-            Err(poisoned) => poisoned.into_inner(),
-        };
+    pub fn current(&self) -> PlanResponse<Option<Current>> {
+        self.with_context(|context| {
+            let index_response = context.get_current_index();
+            let index = index_response.inner().clone();
 
-        let index = context.get_current_index().into_inner();
-        context
-            .get_current_with_history()
-            .map(|(level, task, history)| Current {
-                index,
-                level,
-                task,
-                history,
-            })
+            let followups = index_response.suggested_followups.clone();
+            let reminder = index_response.reminder.clone();
+
+            let current_opt = context
+                .get_current_with_history()
+                .map(|(level, task, history)| Current {
+                    index,
+                    level,
+                    task,
+                    history,
+                });
+
+            PlanResponse::new(current_opt, followups, reminder)
+        })
     }
 
     pub fn add_task(&self, description: String) -> PlanResponse<Option<(Task, Index)>> {
@@ -539,16 +619,13 @@ impl Core {
             // Get the current index as PlanResponse<Index>
             let index_response = context.get_current_index();
             // Extract just the index value
-            let index = index_response.into_inner();
+            let index = index_response.inner().clone();
             // Complete the task
-            let response = context.complete_task(index);
-
-            // Return the response
-            response
+            context.complete_task(index)
         })
     }
 
-    pub fn move_to(&self, index: Index) -> Option<String> {
+    pub fn move_to(&self, index: Index) -> PlanResponse<Option<String>> {
         self.with_context(|context| context.move_to(index))
     }
 
@@ -558,7 +635,11 @@ impl Core {
     }
 
     /// Changes the level of a task at the given index
-    pub fn change_level(&self, index: Index, level_index: usize) -> Result<(), String> {
+    pub fn change_level(
+        &self,
+        index: Index,
+        level_index: usize,
+    ) -> PlanResponse<Result<(), String>> {
         self.with_context(|context| context.change_level(index, level_index))
     }
 
@@ -586,27 +667,21 @@ mod tests {
         assert_eq!(task2_index, vec![1]);
 
         // Move to the first task
-        assert_eq!(
-            context.move_to(task1_index.clone()),
-            Some("Task 1".to_string())
-        );
+        let move_response = context.move_to(task1_index.clone());
+        assert_eq!(move_response.inner(), &Some("Task 1".to_string()));
 
         // Add a subtask to the first task
         let subtask1_index = context.add_task("Subtask 1".to_string()).into_inner().1;
         assert_eq!(subtask1_index, vec![0, 0]);
 
         // Move to the second task
-        assert_eq!(
-            context.move_to(task2_index.clone()),
-            Some("Task 2".to_string())
-        );
+        let move_response = context.move_to(task2_index.clone());
+        assert_eq!(move_response.inner(), &Some("Task 2".to_string()));
         assert_eq!(*context.get_current_index().inner(), vec![1]);
 
         // Move to subtask 1
-        assert_eq!(
-            context.move_to(subtask1_index.clone()),
-            Some("Subtask 1".to_string())
-        );
+        let move_response = context.move_to(subtask1_index.clone());
+        assert_eq!(move_response.inner(), &Some("Subtask 1".to_string()));
         assert_eq!(*context.get_current_index().inner(), vec![0, 0]);
     }
 
@@ -645,7 +720,8 @@ mod tests {
         let task2_index = context.add_task("Task 2".to_string()).into_inner().1;
 
         // Move to the first task and add subtasks
-        assert!(context.move_to(task1_index.clone()).is_some());
+        let move_response = context.move_to(task1_index.clone());
+        assert!(move_response.inner().is_some());
         let subtask1_index = context.add_task("Subtask 1".to_string()).into_inner().1;
         let subtask2_index = context.add_task("Subtask 2".to_string()).into_inner().1;
 
@@ -666,26 +742,20 @@ mod tests {
         let plan = Plan::new(default_levels());
         let mut context = Context::new(plan);
         let root_index = context.add_task("Root task".to_string()).into_inner().1;
-        assert_eq!(
-            context.move_to(root_index.clone()),
-            Some("Root task".to_string())
-        );
+        let move_response = context.move_to(root_index.clone());
+        assert_eq!(move_response.inner(), &Some("Root task".to_string()));
 
         assert_eq!(*context.get_current_index().inner(), vec![0]);
 
         let task1_index = context.add_task("Task 1".to_string()).into_inner().1;
-        assert_eq!(
-            context.move_to(task1_index.clone()),
-            Some("Task 1".to_string())
-        );
+        let move_response = context.move_to(task1_index.clone());
+        assert_eq!(move_response.inner(), &Some("Task 1".to_string()));
         assert_eq!(*context.get_current_index().inner(), vec![0, 0]);
 
         let task2_index = context.add_task("Task 2".to_string()).into_inner().1;
         assert_eq!(*context.get_current_index().inner(), vec![0, 0]);
-        assert_eq!(
-            context.move_to(task2_index.clone()),
-            Some("Task 2".to_string())
-        );
+        let move_response = context.move_to(task2_index.clone());
+        assert_eq!(move_response.inner(), &Some("Task 2".to_string()));
         assert_eq!(*context.get_current_index().inner(), vec![0, 0, 0]);
     }
 
@@ -695,19 +765,22 @@ mod tests {
         let plan = Plan::new(default_levels());
         let mut context = Context::new(plan);
         let root_index = context.add_task("Root task".to_string()).into_inner().1;
-        assert!(context.move_to(root_index.clone()).is_some());
+        let move_response = context.move_to(root_index.clone());
+        assert!(move_response.inner().is_some());
 
         // Add sibling tasks
         let task1_index = context.add_task("Task 1".to_string()).into_inner().1;
         let _ = context.add_task("Task 2".to_string());
 
         // Move to the first task and add a subtask
-        assert!(context.move_to(task1_index.clone()).is_some());
+        let move_response = context.move_to(task1_index.clone());
+        assert!(move_response.inner().is_some());
         let subtask1_index = context.add_task("Subtask 1".to_string()).into_inner().1;
         assert_eq!(subtask1_index, vec![0, 0, 0]);
 
         // Test getting history for the subtask
-        context.move_to(subtask1_index.clone()).unwrap();
+        let move_response = context.move_to(subtask1_index.clone());
+        assert!(move_response.inner().is_some());
         let (level, task, task_history) = context.get_current_with_history().unwrap();
 
         // Verify the level is correct (we're at depth 3, so using isolation level)
@@ -741,7 +814,8 @@ mod tests {
         assert_eq!(context.get_current_level(), 0);
 
         // Move to task1 (level 1)
-        assert!(context.move_to(task1_index.clone()).is_some());
+        let move_response = context.move_to(task1_index.clone());
+        assert!(move_response.inner().is_some());
         assert_eq!(context.get_current_level(), 1);
 
         // Add a subtask to task1
@@ -749,7 +823,8 @@ mod tests {
         assert_eq!(context.get_current_level(), 1);
 
         // Move to subtask1 (level 2)
-        assert!(context.move_to(subtask1_index.clone()).is_some());
+        let move_response = context.move_to(subtask1_index.clone());
+        assert!(move_response.inner().is_some());
         assert_eq!(context.get_current_level(), 2);
 
         // Set level back to 1
@@ -786,7 +861,7 @@ mod tests {
 
         // Change the level
         let result = context.change_level(task_index.clone(), 0);
-        assert!(result.is_ok());
+        assert!(result.inner().is_ok());
 
         // Verify the level was changed
         let task = context.get_task(task_index).unwrap();
@@ -805,15 +880,23 @@ mod tests {
         let task_index = response.into_inner().unwrap().1;
 
         // Move to the task
-        let result = core.move_to(task_index.clone());
-        assert_eq!(result, Some("Task through Core".to_string()));
+        let move_response = core.move_to(task_index.clone());
+        assert_eq!(
+            move_response.inner(),
+            &Some("Task through Core".to_string())
+        );
 
         // Complete the task
         assert!(*core.complete_task().inner());
 
         // Verify task is completed via Current
-        let current = core.current().unwrap();
-        assert!(current.task.is_completed());
+        let current_response = core.current();
+        assert!(current_response
+            .inner()
+            .as_ref()
+            .unwrap()
+            .task
+            .is_completed());
     }
 
     #[test]

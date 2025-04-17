@@ -95,10 +95,17 @@ impl Client {
             )));
         }
 
-        let api_response: ApiResponse<models::Current> = response.json().await?;
+        let api_response: ApiResponse<models::PlanResponse<Option<models::Current>>> =
+            response.json().await?;
 
         if api_response.success {
-            api_response.data.ok_or(ClientError::MissingData)
+            match api_response.data {
+                Some(plan_response) => match plan_response.res {
+                    Some(current) => Ok(current),
+                    None => Err(ClientError::MissingData),
+                },
+                None => Err(ClientError::MissingData),
+            }
         } else {
             Err(ClientError::Api(
                 api_response
@@ -176,9 +183,16 @@ impl Client {
         let response = self.http_client.post(&url).json(&request).send().await?;
 
         if response.status().is_success() {
-            let api_response: ApiResponse<String> = response.json().await?;
+            let api_response: ApiResponse<models::PlanResponse<Option<String>>> =
+                response.json().await?;
             if api_response.success {
-                api_response.data.ok_or(ClientError::MissingData)
+                match api_response.data {
+                    Some(plan_response) => match plan_response.res {
+                        Some(description) => Ok(description),
+                        None => Err(ClientError::MissingData),
+                    },
+                    None => Err(ClientError::MissingData),
+                }
             } else {
                 Err(ClientError::Api(
                     api_response
@@ -187,7 +201,7 @@ impl Client {
                 ))
             }
         } else {
-            let api_response: ApiResponse<String> = response.json().await?;
+            let api_response: ApiResponse<()> = response.json().await?;
             Err(ClientError::Api(
                 api_response
                     .error

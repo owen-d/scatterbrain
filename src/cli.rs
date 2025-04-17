@@ -448,7 +448,8 @@ fn create_example_tasks(context: &mut Context) {
         .1;
 
     // Add subtasks to the project
-    context.move_to(project_index.clone()).unwrap();
+    let move_response = context.move_to(project_index.clone());
+    assert!(move_response.inner().is_some());
     let frontend_index = context
         .add_task("Implement Frontend".to_string())
         .into_inner()
@@ -463,7 +464,8 @@ fn create_example_tasks(context: &mut Context) {
         .1;
 
     // Add subtasks to frontend
-    context.move_to(frontend_index.clone()).unwrap();
+    let move_response = context.move_to(frontend_index.clone());
+    assert!(move_response.inner().is_some());
     let ui_index = context
         .add_task("Design UI Components".to_string())
         .into_inner()
@@ -478,7 +480,8 @@ fn create_example_tasks(context: &mut Context) {
     context.complete_task(ui_index);
 
     // Add subtasks to backend
-    context.move_to(backend_index.clone()).unwrap();
+    let move_response = context.move_to(backend_index.clone());
+    assert!(move_response.inner().is_some());
     context.add_task("Set up API Routes".to_string());
     let auth_logic_index = context
         .add_task("Implement Authentication Logic".to_string())
@@ -490,24 +493,28 @@ fn create_example_tasks(context: &mut Context) {
         .1;
 
     // Add subtasks to data models
-    context.move_to(data_index.clone()).unwrap();
+    let move_response = context.move_to(data_index.clone());
+    assert!(move_response.inner().is_some());
     context.add_task("User Model".to_string());
     let _product_index = context.add_task("Product Model".to_string()).into_inner().1;
     context.add_task("Order Model".to_string());
 
     // Add subtasks to documentation
-    context.move_to(docs_index.clone()).unwrap();
+    let move_response = context.move_to(docs_index.clone());
+    assert!(move_response.inner().is_some());
     context.add_task("API Documentation".to_string());
     context.add_task("User Manual".to_string());
     context.add_task("Developer Guide".to_string());
 
     // Add subtasks to testing
-    context.move_to(test_index.clone()).unwrap();
+    let move_response = context.move_to(test_index.clone());
+    assert!(move_response.inner().is_some());
     context.add_task("Unit Tests".to_string());
     context.add_task("Integration Tests".to_string());
     context.add_task("Performance Tests".to_string());
 
     // Set a nested task as the current task
     // This will highlight the auth logic task in the backend section
-    context.move_to(auth_logic_index).unwrap();
+    let move_response = context.move_to(auth_logic_index);
+    assert!(move_response.inner().is_some());
 }
