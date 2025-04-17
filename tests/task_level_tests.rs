@@ -128,9 +128,10 @@ fn test_core_functionality() {
     assert!(!current.task.is_completed());
 
     // Complete the task
-    assert!(core.complete_task());
+    let complete_response = core.complete_task();
+    assert!(*complete_response.inner());
 
-    // Verify task is now completed
+    // Verify task is completed via Current
     let current = core.current().unwrap();
     assert!(current.task.is_completed());
 

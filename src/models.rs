@@ -235,13 +235,22 @@ impl Context {
 
     // Task state management
     /// Completes the task at the given index
-    pub fn complete_task(&mut self, index: Index) -> bool {
-        if let Some(task) = self.get_task_mut(index) {
+    pub fn complete_task(&mut self, index: Index) -> PlanResponse<bool> {
+        let success = if let Some(task) = self.get_task_mut(index) {
             task.complete();
             true
         } else {
             false
-        }
+        };
+
+        PlanResponse::new(
+            success,
+            vec![
+                "move to the next task".to_string(),
+                "add a related task".to_string(),
+            ],
+            Some("Great progress! What's next on your plan?".to_string()),
+        )
     }
 
     /// Changes the level of a task at the given index
@@ -361,13 +370,20 @@ impl Context {
     }
 
     /// Gets the current index
-    pub fn get_current_index(&self) -> &Index {
-        &self.cursor
+    pub fn get_current_index(&self) -> PlanResponse<Index> {
+        PlanResponse::new(
+            self.cursor.clone(),
+            vec![
+                "move to different task".to_string(),
+                "add a subtask".to_string(),
+            ],
+            Some("Consider where you are in the task hierarchy".to_string()),
+        )
     }
 
     /// Gets the current level based on cursor depth
     pub fn get_current_level(&self) -> usize {
-        self.cursor.len()
+        self.get_current_index().inner().len()
     }
 
     /// Sets the current level by trimming the cursor
@@ -498,7 +514,7 @@ impl Core {
             Err(poisoned) => poisoned.into_inner(),
         };
 
-        let index = context.get_current_index().clone();
+        let index = context.get_current_index().into_inner();
         context
             .get_current_with_history()
             .map(|(level, task, history)| Current {
@@ -518,10 +534,17 @@ impl Core {
         })
     }
 
-    pub fn complete_task(&self) -> bool {
+    pub fn complete_task(&self) -> PlanResponse<bool> {
         self.with_context(|context| {
-            let index = context.get_current_index().clone();
-            context.complete_task(index)
+            // Get the current index as PlanResponse<Index>
+            let index_response = context.get_current_index();
+            // Extract just the index value
+            let index = index_response.into_inner();
+            // Complete the task
+            let response = context.complete_task(index);
+
+            // Return the response
+            response
         })
     }
 
@@ -538,6 +561,10 @@ impl Core {
     pub fn change_level(&self, index: Index, level_index: usize) -> Result<(), String> {
         self.with_context(|context| context.change_level(index, level_index))
     }
+
+    pub fn get_current_index(&self) -> PlanResponse<Index> {
+        self.with_context(|context| context.get_current_index())
+    }
 }
 
 #[cfg(test)]
@@ -549,7 +576,7 @@ mod tests {
         // Create a plan with default levels
         let plan = Plan::new(default_levels());
         let mut context = Context::new(plan);
-        assert_eq!(context.get_current_index(), &Vec::<usize>::new());
+        assert_eq!(*context.get_current_index().inner(), Vec::<usize>::new());
         // Add a task at the root level
         let task1_index = context.add_task("Task 1".to_string()).into_inner().1;
         assert_eq!(task1_index, vec![0]);
@@ -573,14 +600,14 @@ mod tests {
             context.move_to(task2_index.clone()),
             Some("Task 2".to_string())
         );
-        assert_eq!(context.get_current_index(), &vec![1]);
+        assert_eq!(*context.get_current_index().inner(), vec![1]);
 
         // Move to subtask 1
         assert_eq!(
             context.move_to(subtask1_index.clone()),
             Some("Subtask 1".to_string())
         );
-        assert_eq!(context.get_current_index(), &vec![0, 0]);
+        assert_eq!(*context.get_current_index().inner(), vec![0, 0]);
     }
 
     #[test]
@@ -595,7 +622,7 @@ mod tests {
         let task2_index = context.add_task("Task 2".to_string()).into_inner().1;
 
         // Complete a task
-        assert!(context.complete_task(task1_index.clone()));
+        assert!(*context.complete_task(task1_index.clone()).inner());
 
         // Verify the task is completed
         let task = context.get_task(task1_index).unwrap();
@@ -644,22 +671,22 @@ mod tests {
             Some("Root task".to_string())
         );
 
-        assert_eq!(context.get_current_index(), &vec![0]);
+        assert_eq!(*context.get_current_index().inner(), vec![0]);
 
         let task1_index = context.add_task("Task 1".to_string()).into_inner().1;
         assert_eq!(
             context.move_to(task1_index.clone()),
             Some("Task 1".to_string())
         );
-        assert_eq!(context.get_current_index(), &vec![0, 0]);
+        assert_eq!(*context.get_current_index().inner(), vec![0, 0]);
 
         let task2_index = context.add_task("Task 2".to_string()).into_inner().1;
-        assert_eq!(context.get_current_index(), &vec![0, 0]);
+        assert_eq!(*context.get_current_index().inner(), vec![0, 0]);
         assert_eq!(
             context.move_to(task2_index.clone()),
             Some("Task 2".to_string())
         );
-        assert_eq!(context.get_current_index(), &vec![0, 0, 0]);
+        assert_eq!(*context.get_current_index().inner(), vec![0, 0, 0]);
     }
 
     #[test]
@@ -728,12 +755,12 @@ mod tests {
         // Set level back to 1
         context.set_current_level(1);
         assert_eq!(context.get_current_level(), 1);
-        assert_eq!(context.get_current_index(), &task1_index);
+        assert_eq!(*context.get_current_index().inner(), task1_index);
 
         // Set level back to 0 (root)
         context.set_current_level(0);
         assert_eq!(context.get_current_level(), 0);
-        assert!(context.get_current_index().is_empty());
+        assert!(context.get_current_index().inner().is_empty());
     }
 
     #[test]
@@ -782,7 +809,7 @@ mod tests {
         assert_eq!(result, Some("Task through Core".to_string()));
 
         // Complete the task
-        assert!(core.complete_task());
+        assert!(*core.complete_task().inner());
 
         // Verify task is completed via Current
         let current = core.current().unwrap();

@@ -166,13 +166,14 @@ async fn add_task(
 }
 
 async fn complete_task(State(core): State<Core>) -> impl IntoResponse {
-    let success = core.complete_task();
-    if success {
-        StatusCode::OK.into_response()
+    let response = core.complete_task();
+
+    if *response.inner() {
+        Json(ApiResponse::success(response)).into_response()
     } else {
         (
             StatusCode::BAD_REQUEST,
-            Json(ApiResponse::<()>::error(
+            Json(ApiResponse::<PlanResponse<bool>>::error(
                 "Failed to complete current task".to_string(),
             )),
         )

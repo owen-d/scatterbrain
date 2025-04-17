@@ -139,12 +139,21 @@ impl Client {
     }
 
     /// Complete the current task
-    pub async fn complete_task(&self) -> Result<(), ClientError> {
+    pub async fn complete_task(&self) -> Result<models::PlanResponse<bool>, ClientError> {
         let url = format!("{}/api/task/complete", self.config.base_url);
         let response = self.http_client.post(&url).send().await?;
 
         if response.status().is_success() {
-            Ok(())
+            let api_response: ApiResponse<models::PlanResponse<bool>> = response.json().await?;
+            if api_response.success {
+                api_response.data.ok_or(ClientError::MissingData)
+            } else {
+                Err(ClientError::Api(
+                    api_response
+                        .error
+                        .unwrap_or_else(|| "Unknown API error".to_string()),
+                ))
+            }
         } else {
             let api_response: ApiResponse<()> = response.json().await?;
             Err(ClientError::Api(

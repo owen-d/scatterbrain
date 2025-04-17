@@ -144,8 +144,22 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
                 }
 
                 TaskCommands::Complete => {
-                    client.complete_task().await?;
+                    let response = client.complete_task().await?;
                     println!("Completed the current task");
+
+                    // Print follow-up suggestions
+                    if !response.suggested_followups.is_empty() {
+                        println!("\nSuggested next steps:");
+                        for suggestion in &response.suggested_followups {
+                            println!("  • {}", suggestion);
+                        }
+                    }
+
+                    // Print reminder if any
+                    if let Some(reminder) = &response.reminder {
+                        println!("\nReminder: {}", reminder);
+                    }
+
                     Ok(())
                 }
 
