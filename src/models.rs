@@ -283,7 +283,8 @@ impl Context {
         )
     }
 
-    /// Changes the level of a task at the given index
+    /// Changes the level of a task at the given index,
+    /// returning a followup suggestion and reminder
     pub fn change_level(
         &mut self,
         index: Index,

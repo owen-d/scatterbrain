@@ -24,19 +24,19 @@ use crate::models::{self, Index};
 use crate::Core;
 
 /// Request to add a new task
-#[derive(Deserialize)]
+#[derive(Serialize, Deserialize)]
 pub struct AddTaskRequest {
     pub description: String,
 }
 
 /// Request to move to a specific task
-#[derive(Deserialize)]
+#[derive(Serialize, Deserialize)]
 pub struct MoveToRequest {
     pub index: Index,
 }
 
 /// Request to change a task's abstraction level
-#[derive(Deserialize)]
+#[derive(Serialize, Deserialize)]
 pub struct ChangeLevelRequest {
     pub index: Index,
     pub level_index: usize,

@@ -5,10 +5,12 @@
 use std::sync::Arc;
 
 use reqwest::{Client as ReqwestClient, Error as ReqwestError};
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
 
 use crate::models;
 use crate::models::Index;
+
+use super::server::{AddTaskRequest, ChangeLevelRequest, MoveToRequest};
 
 /// API client configuration
 #[derive(Debug, Clone)]
@@ -84,7 +86,9 @@ impl Client {
     }
 
     /// Get the current task
-    pub async fn get_current(&self) -> Result<models::Current, ClientError> {
+    pub async fn get_current(
+        &self,
+    ) -> Result<models::PlanResponse<Option<models::Current>>, ClientError> {
         let url = format!("{}/api/current", self.config.base_url);
         let response = self.http_client.get(&url).send().await?;
 
@@ -100,10 +104,7 @@ impl Client {
 
         if api_response.success {
             match api_response.data {
-                Some(plan_response) => match plan_response.res {
-                    Some(current) => Ok(current),
-                    None => Err(ClientError::MissingData),
-                },
+                Some(plan_response) => Ok(plan_response),
                 None => Err(ClientError::MissingData),
             }
         } else {
@@ -116,12 +117,10 @@ impl Client {
     }
 
     /// Add a new task
-    pub async fn add_task(&self, description: String) -> Result<Index, ClientError> {
-        #[derive(Serialize)]
-        struct AddTaskRequest {
-            description: String,
-        }
-
+    pub async fn add_task(
+        &self,
+        description: String,
+    ) -> Result<models::PlanResponse<Option<(models::Task, Index)>>, ClientError> {
         let url = format!("{}/api/task", self.config.base_url);
         let request = AddTaskRequest { description };
         let response = self.http_client.post(&url).json(&request).send().await?;
@@ -130,10 +129,7 @@ impl Client {
 
         if api_response.success {
             match api_response.data {
-                Some(plan_response) => match plan_response.into_inner() {
-                    Some((_, index)) => Ok(index),
-                    None => Err(ClientError::MissingData),
-                },
+                Some(plan_response) => Ok(plan_response),
                 None => Err(ClientError::MissingData),
             }
         } else {
@@ -172,12 +168,10 @@ impl Client {
     }
 
     /// Move to a specific task
-    pub async fn move_to(&self, index: Index) -> Result<String, ClientError> {
-        #[derive(Serialize)]
-        struct MoveToRequest {
-            index: Index,
-        }
-
+    pub async fn move_to(
+        &self,
+        index: Index,
+    ) -> Result<models::PlanResponse<Option<String>>, ClientError> {
         let url = format!("{}/api/move", self.config.base_url);
         let request = MoveToRequest { index };
         let response = self.http_client.post(&url).json(&request).send().await?;
@@ -187,10 +181,7 @@ impl Client {
                 response.json().await?;
             if api_response.success {
                 match api_response.data {
-                    Some(plan_response) => match plan_response.res {
-                        Some(description) => Ok(description),
-                        None => Err(ClientError::MissingData),
-                    },
+                    Some(plan_response) => Ok(plan_response),
                     None => Err(ClientError::MissingData),
                 }
             } else {
@@ -211,19 +202,29 @@ impl Client {
     }
 
     /// Change the abstraction level of a task
-    pub async fn change_level(&self, index: Index, level_index: usize) -> Result<(), ClientError> {
-        #[derive(Serialize)]
-        struct ChangeLevelRequest {
-            index: Index,
-            level_index: usize,
-        }
-
+    pub async fn change_level(
+        &self,
+        index: Index,
+        level_index: usize,
+    ) -> Result<models::PlanResponse<()>, ClientError> {
         let url = format!("{}/api/task/level", self.config.base_url);
         let request = ChangeLevelRequest { index, level_index };
         let response = self.http_client.post(&url).json(&request).send().await?;
 
         if response.status().is_success() {
-            Ok(())
+            let api_response: ApiResponse<models::PlanResponse<()>> = response.json().await?;
+            if api_response.success {
+                match api_response.data {
+                    Some(plan_response) => Ok(plan_response),
+                    None => Err(ClientError::MissingData),
+                }
+            } else {
+                Err(ClientError::Api(
+                    api_response
+                        .error
+                        .unwrap_or_else(|| "Unknown API error".to_string()),
+                ))
+            }
         } else {
             let api_response: ApiResponse<()> = response.json().await?;
             Err(ClientError::Api(

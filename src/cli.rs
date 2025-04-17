@@ -124,7 +124,8 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
             match command {
                 TaskCommands::Add { description, level } => {
                     // Add the task
-                    let index = client.add_task(description.clone()).await?;
+                    let response = client.add_task(description.clone()).await?;
+                    let (_task, index) = response.inner().as_ref().unwrap();
 
                     // If a level is specified, set it
                     if let Some(level_val) = level {
@@ -165,15 +166,35 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
 
                 TaskCommands::ChangeLevel { level_index } => {
                     // Get the current position
-                    let current = client.get_current().await?;
-                    let index = current.index;
+                    let current_response = client.get_current().await?;
+
+                    // Safely extract the inner value
+                    if current_response.inner().is_none() {
+                        return Err("No current task selected".into());
+                    }
+
+                    // Clone the index to avoid borrowing issues
+                    let index = current_response.inner().as_ref().unwrap().index.clone();
 
                     // Change the level
-                    client.change_level(index, *level_index).await?;
+                    let response = client.change_level(index, *level_index).await?;
                     println!(
                         "Changed the abstraction level of the current task to {}",
                         level_index
                     );
+
+                    // Print follow-up suggestions and reminders
+                    if !response.suggested_followups.is_empty() {
+                        println!("\nSuggested next steps:");
+                        for suggestion in &response.suggested_followups {
+                            println!("  • {}", suggestion);
+                        }
+                    }
+
+                    if let Some(reminder) = &response.reminder {
+                        println!("\nReminder: {}", reminder);
+                    }
+
                     Ok(())
                 }
             }
@@ -185,8 +206,26 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
             // Parse the index string (format: 0 or 0,1,2)
             let parsed_index = parse_index(index)?;
 
-            let description = client.move_to(parsed_index).await?;
+            let response = client.move_to(parsed_index).await?;
+
+            // Create a longer-lived binding for the string
+            let unknown_str = "Unknown".to_string();
+            let description = response.inner().as_ref().unwrap_or(&unknown_str);
+
             println!("Moved to task: \"{}\" at index: {}", description, index);
+
+            // Print follow-up suggestions and reminders
+            if !response.suggested_followups.is_empty() {
+                println!("\nSuggested next steps:");
+                for suggestion in &response.suggested_followups {
+                    println!("  • {}", suggestion);
+                }
+            }
+
+            if let Some(reminder) = &response.reminder {
+                println!("\nReminder: {}", reminder);
+            }
+
             Ok(())
         }
 
@@ -202,23 +241,43 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
             let client = create_client(&cli.server);
 
             match client.get_current().await {
-                Ok(current) => {
-                    println!("Current Task:");
-                    println!("  Description: {}", current.task.description());
-                    println!("  Completed: {}", current.task.is_completed());
-                    println!("  Level: {}", current.level.description());
-                    println!("  Index: {:?}", current.index);
+                Ok(current_response) => {
+                    // Check if we have a current task
+                    if let Some(current) = current_response.inner() {
+                        // Print current task info
+                        let current_clone = current.clone();
 
-                    if !current.task.subtasks().is_empty() {
-                        println!("\nSubtasks:");
-                        for (i, subtask) in current.task.subtasks().iter().enumerate() {
-                            println!(
-                                "  {}. {} (completed: {})",
-                                i,
-                                subtask.description(),
-                                subtask.is_completed()
-                            );
+                        println!("Current Task:");
+                        println!("  Description: {}", current_clone.task.description());
+                        println!("  Completed: {}", current_clone.task.is_completed());
+                        println!("  Level: {}", current_clone.level.description());
+                        println!("  Index: {:?}", current_clone.index);
+
+                        if !current_clone.task.subtasks().is_empty() {
+                            println!("\nSubtasks:");
+                            for (i, subtask) in current_clone.task.subtasks().iter().enumerate() {
+                                println!(
+                                    "  {}. {} (completed: {})",
+                                    i,
+                                    subtask.description(),
+                                    subtask.is_completed()
+                                );
+                            }
                         }
+                    } else {
+                        println!("No current task selected. Use 'move' to select a task.");
+                    }
+
+                    // Print follow-up suggestions and reminders
+                    if !current_response.suggested_followups.is_empty() {
+                        println!("\nSuggested next steps:");
+                        for suggestion in &current_response.suggested_followups {
+                            println!("  • {}", suggestion);
+                        }
+                    }
+
+                    if let Some(reminder) = &current_response.reminder {
+                        println!("\nReminder: {}", reminder);
                     }
 
                     Ok(())
