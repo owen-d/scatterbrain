@@ -232,23 +232,14 @@ impl Context {
         if let Some(task) = task_opt {
             let description = task.description().to_string();
 
-            // Create followup suggestions based on task state
-            let mut followups = vec!["add a subtask".to_string()];
-            if !task.is_completed() {
-                followups.push("complete this task".to_string());
-            }
-            if !task.subtasks().is_empty() {
-                followups.push("move to a subtask".to_string());
-            }
+            // Get the level index - either from the task or inferred from depth
+            let level_index = task.level_index().unwrap_or(index.len().min(3));
 
-            // Create reminder
-            let reminder = if !task.is_completed() && !task.subtasks().is_empty() {
-                Some("Remember to complete subtasks before marking this task as done".to_string())
-            } else if !task.is_completed() {
-                Some("Focus on this task until it's completed".to_string())
-            } else {
-                Some("This task is already completed".to_string())
-            };
+            // Get level-specific followups
+            let followups = get_level_specific_followups(task, level_index, self.plan.levels());
+
+            // Get level-specific reminder
+            let reminder = get_level_specific_reminder(task, level_index, self.plan.levels());
 
             // Set cursor after we're done with task operations
             self.cursor = index;
@@ -266,20 +257,46 @@ impl Context {
     // Task state management
     /// Completes the task at the given index
     pub fn complete_task(&mut self, index: Index) -> PlanResponse<bool> {
-        let success = if let Some(task) = self.get_task_mut(index) {
+        // First, get a clone of the task for generating suggestions
+        let task_clone_opt = self.get_task(index.clone()).map(|t| t.clone());
+
+        // Complete the task
+        let success = if let Some(task) = self.get_task_mut(index.clone()) {
             task.complete();
             true
         } else {
             false
         };
 
+        if success {
+            // Now that we've modified the task, use the clone for suggestions
+            if let Some(mut task_clone) = task_clone_opt {
+                // Mark the clone as completed
+                task_clone.complete();
+
+                // Get level information
+                let level_index = task_clone.level_index().unwrap_or(index.len().min(3));
+                let levels = self.plan.levels();
+
+                // Generate suggestions
+                let followups = get_level_specific_followups(&task_clone, level_index, levels);
+
+                // For task completion, always use an encouraging reminder
+                let reminder = Some("Great progress! What's next on your plan?".to_string());
+
+                return PlanResponse::new(success, followups, reminder);
+            }
+        }
+
+        // Fallback if task not found or clone unavailable
         PlanResponse::new(
             success,
-            vec![
-                "move to the next task".to_string(),
-                "add a related task".to_string(),
-            ],
-            Some("Great progress! What's next on your plan?".to_string()),
+            vec!["view the plan".to_string()],
+            Some(if success {
+                "Great progress! What's next on your plan?".to_string()
+            } else {
+                "Task not found. Try viewing the plan to find a valid task.".to_string()
+            }),
         )
     }
 
@@ -355,24 +372,26 @@ impl Context {
         }
 
         // Apply the change
-        if let Some(task) = self.get_task_mut(index) {
-            // Set the level
-            task.set_level(level_index);
+        let task_opt = self.get_task(index.clone());
+        if let Some(task) = task_opt {
+            // Clone the task and get level information
+            let mut task_clone = task.clone();
+            let levels = self.plan.levels().to_vec();
 
-            // Generate followups based on the new level
-            let followup_suggestions = vec![
-                "continue working on this task".to_string(),
-                "move to another task".to_string(),
-            ];
+            // Get the mutable task and set the level
+            if let Some(task_mut) = self.get_task_mut(index) {
+                task_mut.set_level(level_index);
+            }
 
-            // Create a level-specific reminder
-            let reminder = match level_index {
-                0 => Some("This is now a high-level strategic task".to_string()),
-                1 => Some("This is now a task focused on component isolation".to_string()),
-                2 => Some("This is now a task focused on ordering and sequence".to_string()),
-                3 => Some("This is now an implementation-level task".to_string()),
-                _ => Some(format!("Task is now at level {}", level_index)),
-            };
+            // Update our cloned task with the new level (for generating suggestions)
+            task_clone.set_level(level_index);
+
+            // Generate level-specific followups using our clone
+            let followup_suggestions =
+                get_level_specific_followups(&task_clone, level_index, &levels);
+
+            // Generate level-specific reminder using our clone
+            let reminder = get_level_specific_reminder(&task_clone, level_index, &levels);
 
             PlanResponse::new(Ok(()), followup_suggestions, reminder)
         } else {
@@ -444,14 +463,30 @@ impl Context {
 
     /// Gets the current index
     pub fn get_current_index(&self) -> PlanResponse<Index> {
-        PlanResponse::new(
-            self.cursor.clone(),
-            vec![
-                "move to different task".to_string(),
-                "add a subtask".to_string(),
-            ],
-            Some("Consider where you are in the task hierarchy".to_string()),
-        )
+        // Get the current task and level for better context
+        let current_task_opt = self.get_current_task();
+        if let Some(current_task) = current_task_opt {
+            let level_index = current_task
+                .level_index()
+                .unwrap_or(self.cursor.len().min(3));
+            let levels = self.plan.levels();
+
+            // Use helper functions to generate context-aware followups and reminders
+            let followups = get_level_specific_followups(current_task, level_index, levels);
+            let reminder = get_level_specific_reminder(current_task, level_index, levels);
+
+            PlanResponse::new(self.cursor.clone(), followups, reminder)
+        } else {
+            // Fallback if no current task
+            PlanResponse::new(
+                self.cursor.clone(),
+                vec![
+                    "move to different task".to_string(),
+                    "add a subtask".to_string(),
+                ],
+                Some("Consider where you are in the task hierarchy".to_string()),
+            )
+        }
     }
 
     /// Gets the current level based on cursor depth
@@ -484,11 +519,19 @@ impl Context {
     // Plan access
     /// Gets the plan
     pub fn get_plan(&self) -> PlanResponse<Plan> {
-        PlanResponse::new(
-            self.plan.clone(),
-            vec!["Add tasks to build your plan".to_string()],
-            Some("Focus on one level of abstraction at a time".to_string()),
-        )
+        // Get the root task to generate better guidance
+        let root_task = self.plan.root();
+        let levels = self.plan.levels();
+
+        // For the plan view, we want to encourage high-level thinking
+        // So we'll use level 0 (high-level planning) for guidance
+        let level_index = 0;
+
+        // Use our helper functions
+        let followups = get_level_specific_followups(root_task, level_index, levels);
+        let reminder = Some("Focus on one level of abstraction at a time".to_string());
+
+        PlanResponse::new(self.plan.clone(), followups, reminder)
     }
 
     /// Gets the current task with history
@@ -646,6 +689,126 @@ impl Core {
 
     pub fn get_current_index(&self) -> PlanResponse<Index> {
         self.with_context(|context| context.get_current_index())
+    }
+}
+
+// Helper functions for generating level-specific guidance
+/// Generates level-specific followup suggestions based on current task and level.
+/// Uses the level's abstraction focus and questions to provide relevant guidance.
+pub fn get_level_specific_followups(
+    task: &Task,
+    level_index: usize,
+    levels: &[Level],
+) -> Vec<String> {
+    // Start with some standard task-based followups
+    let mut followups = vec![];
+
+    // Add standard task management followups
+    if !task.is_completed() {
+        followups.push("complete this task".to_string());
+    }
+    followups.push("add a subtask".to_string());
+    if !task.subtasks().is_empty() {
+        followups.push("move to a subtask".to_string());
+    }
+
+    // Add level-specific followups
+    if level_index < levels.len() {
+        let level = &levels[level_index];
+
+        match level_index {
+            // Level 1: High-Level Planning
+            0 => {
+                followups.push("consider architectural implications".to_string());
+                followups.push("evaluate extensibility of this approach".to_string());
+                followups.push("check if abstractions are appropriate".to_string());
+            }
+            // Level 2: Isolation - Component Boundaries
+            1 => {
+                followups.push("ensure components can be completed independently".to_string());
+                followups.push("review component interfaces".to_string());
+                followups.push("verify modularity of boundaries".to_string());
+            }
+            // Level 3: Ordering - Sequencing Components
+            2 => {
+                followups.push("review task dependencies".to_string());
+                followups.push("check build order".to_string());
+                followups.push("identify critical paths".to_string());
+            }
+            // Level 4: Implementation - Specific Tasks
+            3 => {
+                followups.push("identify concrete next steps".to_string());
+                followups.push("consider edge cases".to_string());
+                followups.push("review implementation details".to_string());
+            }
+            // Default for custom levels
+            _ => {
+                followups.push(format!("consider {} level guidance", level.description()));
+            }
+        }
+
+        // Include a suggestion based on level questions
+        if let Some(question) = level.questions().first() {
+            followups.push(format!("reflect on: {}", question));
+        }
+    }
+
+    followups
+}
+
+/// Generates level-specific reminders based on current task and level.
+/// Uses the level's abstraction focus to provide context-specific guidance.
+pub fn get_level_specific_reminder(
+    task: &Task,
+    level_index: usize,
+    levels: &[Level],
+) -> Option<String> {
+    // First, handle task-specific reminders
+    if !task.is_completed() && !task.subtasks().is_empty() {
+        return Some("Remember to complete subtasks before marking this task as done".to_string());
+    }
+
+    // Then, provide level-specific guidance if available
+    if level_index < levels.len() {
+        let level = &levels[level_index];
+
+        // Extract the abstraction focus for this level
+        let focus = level.abstraction_focus();
+
+        // Create a shorter, more focused reminder based on the abstraction focus
+        let reminder = match level_index {
+            // Level 1: High-Level Planning
+            0 => format!(
+                "Maintain altitude. Focus on the big picture: {}",
+                focus.split('.').next().unwrap_or(focus)
+            ),
+            // Level 2: Isolation - Component Boundaries
+            1 => format!(
+                "Define clear boundaries between components: {}",
+                focus.split('.').next().unwrap_or(focus)
+            ),
+            // Level 3: Ordering - Sequencing Components
+            2 => format!(
+                "Think about sequence and progression: {}",
+                focus.split('.').next().unwrap_or(focus)
+            ),
+            // Level 4: Implementation - Specific Tasks
+            3 => format!(
+                "Focus on concrete, actionable steps: {}",
+                focus.split('.').next().unwrap_or(focus)
+            ),
+            // Default for custom levels
+            _ => format!("Level {} guidance: {}", level_index, level.description()),
+        };
+
+        return Some(reminder);
+    }
+
+    // Default reminder if we don't have level information
+    if !task.is_completed() {
+        Some("Focus on this task until it's completed".to_string())
+    } else {
+        Some("This task is already completed".to_string())
     }
 }
 
