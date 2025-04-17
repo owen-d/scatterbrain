@@ -146,20 +146,10 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
 
                 TaskCommands::Complete => {
                     let response = client.complete_task().await?;
-                    println!("Completed the current task");
 
-                    // Print follow-up suggestions
-                    if !response.suggested_followups.is_empty() {
-                        println!("\nSuggested next steps:");
-                        for suggestion in &response.suggested_followups {
-                            println!("  • {}", suggestion);
-                        }
-                    }
-
-                    // Print reminder if any
-                    if let Some(reminder) = &response.reminder {
-                        println!("\nReminder: {}", reminder);
-                    }
+                    print_response(&response, |_| {
+                        println!("Completed the current task");
+                    });
 
                     Ok(())
                 }
@@ -178,22 +168,13 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
 
                     // Change the level
                     let response = client.change_level(index, *level_index).await?;
-                    println!(
-                        "Changed the abstraction level of the current task to {}",
-                        level_index
-                    );
 
-                    // Print follow-up suggestions and reminders
-                    if !response.suggested_followups.is_empty() {
-                        println!("\nSuggested next steps:");
-                        for suggestion in &response.suggested_followups {
-                            println!("  • {}", suggestion);
-                        }
-                    }
-
-                    if let Some(reminder) = &response.reminder {
-                        println!("\nReminder: {}", reminder);
-                    }
+                    print_response(&response, |_| {
+                        println!(
+                            "Changed the abstraction level of the current task to {}",
+                            level_index
+                        );
+                    });
 
                     Ok(())
                 }
@@ -210,21 +191,14 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
 
             // Create a longer-lived binding for the string
             let unknown_str = "Unknown".to_string();
-            let description = response.inner().as_ref().unwrap_or(&unknown_str);
 
-            println!("Moved to task: \"{}\" at index: {}", description, index);
-
-            // Print follow-up suggestions and reminders
-            if !response.suggested_followups.is_empty() {
-                println!("\nSuggested next steps:");
-                for suggestion in &response.suggested_followups {
-                    println!("  • {}", suggestion);
-                }
-            }
-
-            if let Some(reminder) = &response.reminder {
-                println!("\nReminder: {}", reminder);
-            }
+            print_response(&response, |description| {
+                println!(
+                    "Moved to task: \"{}\" at index: {}",
+                    description.as_deref().unwrap_or("Unknown"),
+                    index
+                );
+            });
 
             Ok(())
         }
@@ -242,43 +216,34 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
 
             match client.get_current().await {
                 Ok(current_response) => {
-                    // Check if we have a current task
-                    if let Some(current) = current_response.inner() {
-                        // Print current task info
-                        let current_clone = current.clone();
+                    print_response(&current_response, |current| {
+                        // Check if we have a current task
+                        if let Some(current) = current {
+                            // Print current task info
+                            let current_clone = current.clone();
 
-                        println!("Current Task:");
-                        println!("  Description: {}", current_clone.task.description());
-                        println!("  Completed: {}", current_clone.task.is_completed());
-                        println!("  Level: {}", current_clone.level.description());
-                        println!("  Index: {:?}", current_clone.index);
+                            println!("Current Task:");
+                            println!("  Description: {}", current_clone.task.description());
+                            println!("  Completed: {}", current_clone.task.is_completed());
+                            println!("  Level: {}", current_clone.level.description());
+                            println!("  Index: {:?}", current_clone.index);
 
-                        if !current_clone.task.subtasks().is_empty() {
-                            println!("\nSubtasks:");
-                            for (i, subtask) in current_clone.task.subtasks().iter().enumerate() {
-                                println!(
-                                    "  {}. {} (completed: {})",
-                                    i,
-                                    subtask.description(),
-                                    subtask.is_completed()
-                                );
+                            if !current_clone.task.subtasks().is_empty() {
+                                println!("\nSubtasks:");
+                                for (i, subtask) in current_clone.task.subtasks().iter().enumerate()
+                                {
+                                    println!(
+                                        "  {}. {} (completed: {})",
+                                        i,
+                                        subtask.description(),
+                                        subtask.is_completed()
+                                    );
+                                }
                             }
+                        } else {
+                            println!("No current task selected. Use 'move' to select a task.");
                         }
-                    } else {
-                        println!("No current task selected. Use 'move' to select a task.");
-                    }
-
-                    // Print follow-up suggestions and reminders
-                    if !current_response.suggested_followups.is_empty() {
-                        println!("\nSuggested next steps:");
-                        for suggestion in &current_response.suggested_followups {
-                            println!("  • {}", suggestion);
-                        }
-                    }
-
-                    if let Some(reminder) = &current_response.reminder {
-                        println!("\nReminder: {}", reminder);
-                    }
+                    });
 
                     Ok(())
                 }
@@ -313,37 +278,50 @@ fn create_client(server_url: &str) -> Client {
     Client::with_config(config)
 }
 
-fn print_plan_response(response: &crate::models::PlanResponse<crate::models::Plan>) {
-    println!("Scatterbrain Plan:");
+/// Generic function to print any PlanResponse<T>
+/// Takes a closure to handle printing the inner value
+fn print_response<T, F>(response: &crate::models::PlanResponse<T>, print_inner: F)
+where
+    F: FnOnce(&T),
+{
+    // Print the inner value using the provided closure
+    print_inner(response.inner());
 
-    // Print the plan
-    let plan = response.inner();
-    println!("Levels: {}", plan.levels().len());
-
-    println!("\nRoot Tasks:");
-    if plan.root().subtasks().is_empty() {
-        println!("  No tasks yet. Add some with 'scatterbrain task add'");
-    } else {
-        // Recursively print the task tree
-        for (i, task) in plan.root().subtasks().iter().enumerate() {
-            print_task(task, vec![i]);
+    // Print follow-up suggestions if any
+    if !response.suggested_followups.is_empty() {
+        println!("\nSuggested next steps:");
+        for suggestion in &response.suggested_followups {
+            println!("  • {}", suggestion);
         }
     }
 
-    println!("\nAvailable Levels:");
-    for (i, level) in plan.levels().iter().enumerate() {
-        println!("  {}. {}", i + 1, level.get_guidance());
-    }
-
-    // Print additional information from PlanResponse
-    println!("\nSuggested Next Steps:");
-    for suggestion in &response.suggested_followups {
-        println!("  • {}", suggestion);
-    }
-
+    // Print reminder if any
     if let Some(reminder) = &response.reminder {
         println!("\nReminder: {}", reminder);
     }
+}
+
+fn print_plan_response(response: &crate::models::PlanResponse<crate::models::Plan>) {
+    print_response(response, |plan| {
+        println!("Scatterbrain Plan:");
+
+        println!("Levels: {}", plan.levels().len());
+
+        println!("\nRoot Tasks:");
+        if plan.root().subtasks().is_empty() {
+            println!("  No tasks yet. Add some with 'scatterbrain task add'");
+        } else {
+            // Recursively print the task tree
+            for (i, task) in plan.root().subtasks().iter().enumerate() {
+                print_task(task, vec![i]);
+            }
+        }
+
+        println!("\nAvailable Levels:");
+        for (i, level) in plan.levels().iter().enumerate() {
+            println!("  {}. {}", i + 1, level.get_guidance());
+        }
+    });
 }
 
 /// Recursively prints a task and its subtasks with proper indentation
