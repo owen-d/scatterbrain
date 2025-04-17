@@ -118,11 +118,13 @@ pub async fn serve(core: Core, config: ServerConfig) -> Result<(), Box<dyn std::
 
 // Handler implementations
 async fn get_plan(State(core): State<Core>) -> impl IntoResponse {
-    match core.get_plan() {
-        Some(plan) => Json(ApiResponse::success(plan)).into_response(),
+    let plan_response = core.get_plan();
+
+    match plan_response.inner() {
+        Some(_) => Json(ApiResponse::success(plan_response)).into_response(),
         None => (
             StatusCode::INTERNAL_SERVER_ERROR,
-            Json(ApiResponse::<models::Plan>::error(
+            Json(ApiResponse::<PlanResponse<Option<models::Plan>>>::error(
                 "Failed to access plan data".to_string(),
             )),
         )
@@ -282,10 +284,10 @@ impl Stream for EventStream {
 
 // UI handler
 async fn ui_handler(State(core): State<Core>) -> impl IntoResponse {
-    let plan_opt = core.get_plan();
+    let plan_response = core.get_plan();
     let current_opt = core.current();
 
-    match plan_opt {
+    match plan_response.inner() {
         Some(plan) => {
             let html = render_ui_template(&plan, current_opt.as_ref());
             Html(html).into_response()

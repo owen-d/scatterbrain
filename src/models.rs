@@ -394,8 +394,12 @@ impl Context {
 
     // Plan access
     /// Gets the plan
-    pub fn get_plan(&self) -> &Plan {
-        &self.plan
+    pub fn get_plan(&self) -> PlanResponse<Plan> {
+        PlanResponse::new(
+            self.plan.clone(),
+            vec!["Add tasks to build your plan".to_string()],
+            Some("Focus on one level of abstraction at a time".to_string()),
+        )
     }
 
     /// Gets the current task with history
@@ -406,9 +410,9 @@ impl Context {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PlanResponse<T> {
-    res: T,
-    suggested_followups: Vec<String>,
-    reminder: Option<String>,
+    pub res: T,
+    pub suggested_followups: Vec<String>,
+    pub reminder: Option<String>,
 }
 
 impl<T> PlanResponse<T> {
@@ -474,13 +478,18 @@ impl Core {
         result
     }
 
-    pub fn get_plan(&self) -> Option<Plan> {
+    pub fn get_plan(&self) -> PlanResponse<Option<Plan>> {
         let context = match self.inner.lock() {
             Ok(guard) => guard,
             Err(poisoned) => poisoned.into_inner(),
         };
 
-        Some(context.get_plan().clone())
+        let plan_response = context.get_plan();
+        let followups = plan_response.suggested_followups.clone();
+        let reminder = plan_response.reminder.clone();
+        let plan = Some(plan_response.into_inner());
+
+        PlanResponse::new(plan, followups, reminder)
     }
 
     pub fn current(&self) -> Option<Current> {

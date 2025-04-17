@@ -67,10 +67,10 @@ impl Client {
     }
 
     /// Get the full plan
-    pub async fn get_plan(&self) -> Result<models::Plan, ClientError> {
+    pub async fn get_plan(&self) -> Result<models::PlanResponse<models::Plan>, ClientError> {
         let url = format!("{}/api/plan", self.config.base_url);
         let response = self.http_client.get(&url).send().await?;
-        let api_response: ApiResponse<models::Plan> = response.json().await?;
+        let api_response: ApiResponse<models::PlanResponse<models::Plan>> = response.json().await?;
 
         if api_response.success {
             api_response.data.ok_or(ClientError::MissingData)

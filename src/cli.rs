@@ -179,8 +179,8 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
         Commands::Plan => {
             let client = create_client(&cli.server);
 
-            let plan = client.get_plan().await?;
-            print_plan(&plan);
+            let plan_response = client.get_plan().await?;
+            print_plan_response(&plan_response);
             Ok(())
         }
 
@@ -240,8 +240,11 @@ fn create_client(server_url: &str) -> Client {
     Client::with_config(config)
 }
 
-fn print_plan(plan: &crate::models::Plan) {
+fn print_plan_response(response: &crate::models::PlanResponse<crate::models::Plan>) {
     println!("Scatterbrain Plan:");
+
+    // Print the plan
+    let plan = response.inner();
     println!("Levels: {}", plan.levels().len());
 
     println!("\nRoot Tasks:");
@@ -257,6 +260,16 @@ fn print_plan(plan: &crate::models::Plan) {
     println!("\nAvailable Levels:");
     for (i, level) in plan.levels().iter().enumerate() {
         println!("  {}. {}", i + 1, level.get_guidance());
+    }
+
+    // Print additional information from PlanResponse
+    println!("\nSuggested Next Steps:");
+    for suggestion in &response.suggested_followups {
+        println!("  • {}", suggestion);
+    }
+
+    if let Some(reminder) = &response.reminder {
+        println!("\nReminder: {}", reminder);
     }
 }
 
