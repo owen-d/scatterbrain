@@ -79,7 +79,7 @@ enum TaskCommands {
 
         /// Level index (starting from 0, lower index = higher abstraction level)
         #[arg(short, long)]
-        level: Option<usize>,
+        level: usize,
     },
 
     /// Complete the current task
@@ -133,17 +133,14 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
                     let response = client.add_task(description.clone()).await?;
                     let (_task, index) = response.inner().as_ref().unwrap();
 
-                    // If a level is specified, set it
-                    if let Some(level_val) = level {
-                        if let Err(e) = client.change_level(index.clone(), *level_val).await {
-                            println!("Warning: Could not set level: {}", e);
-                        } else {
-                            println!(
-                                "Added task: \"{}\" with level {} at index: {:?}",
-                                description, level_val, index
-                            );
-                            return Ok(());
-                        }
+                    if let Err(e) = client.change_level(index.clone(), *level).await {
+                        println!("Warning: Could not set level: {}", e);
+                    } else {
+                        println!(
+                            "Added task: \"{}\" with level {} at index: {:?}",
+                            description, level, index
+                        );
+                        return Ok(());
                     }
 
                     println!("Added task: \"{}\" at index: {:?}", description, index);
