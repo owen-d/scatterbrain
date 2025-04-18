@@ -248,11 +248,12 @@ impl Stream for EventStream {
 async fn ui_handler(State(core): State<Core>) -> impl IntoResponse {
     let plan_response = core.get_plan();
     let current_response = core.current();
+    let distilled_context = core.distilled_context().distilled_context;
     let current_opt = current_response.inner();
     let plan = plan_response.inner();
 
-    // Render the UI template
-    let html = render_ui_template(plan, current_opt.as_ref());
+    // Render the UI template, passing the distilled context
+    let html = render_ui_template(plan, current_opt.as_ref(), &distilled_context);
     Html(html).into_response()
 }
 
@@ -260,6 +261,7 @@ async fn ui_handler(State(core): State<Core>) -> impl IntoResponse {
 fn render_ui_template(
     plan: &crate::models::Plan,
     current: Option<&crate::models::Current>,
+    distilled_context: &crate::models::DistilledContext,
 ) -> String {
     let mut html = String::from(HTML_TEMPLATE_HEADER);
 
@@ -352,7 +354,28 @@ fn render_ui_template(
         html.push_str("</div></div>");
     }
 
-    html.push_str(HTML_TEMPLATE_FOOTER);
+    // Add History Panel (moved inside the container)
+    html.push_str("<div class='history-panel'>");
+    html.push_str("<h2>Transition History</h2>");
+    html.push_str("<ul class='history-list'>");
+    if distilled_context.transition_history.is_empty() {
+        html.push_str("<li>No history yet.</li>");
+    } else {
+        // Iterate in reverse to show newest first
+        for entry in distilled_context.transition_history.iter().rev() {
+            let timestamp_str = entry.timestamp.format("%Y-%m-%d %H:%M:%S UTC").to_string();
+            let details_str = entry.details.as_deref().unwrap_or("");
+            html.push_str(&format!(
+                "<li class='history-item'><span class='history-ts'>{}</span><span class='history-action'>{}</span><span class='history-details'>{}</span></li>",
+                timestamp_str,
+                entry.action,
+                details_str
+            ));
+        }
+    }
+    html.push_str("</ul></div>");
+
+    html.push_str(HTML_TEMPLATE_FOOTER); // Footer now only contains closing tags and script
     html
 }
 
@@ -465,23 +488,29 @@ const HTML_TEMPLATE_HEADER: &str = r#"<!DOCTYPE html>
         .container {
             display: flex;
             flex-wrap: wrap;
-            gap: 30px;
+            gap: 20px;
         }
-        .plan-section {
-            flex: 2;
-            min-width: 300px;
-            background: white;
-            padding: 20px;
-            border-radius: 8px;
-            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
-        }
-        .current-section {
+        .plan-section,
+        .current-section,
+        .history-panel {
             flex: 1;
             min-width: 300px;
             background: white;
             padding: 20px;
             border-radius: 8px;
             box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+            align-self: flex-start;
+        }
+        .plan-section {
+            /* Specific styles for plan if needed */
+        }
+        .current-section {
+            /* Specific styles for current task if needed */
+             /* Ensure it aligns even if not always present */
+             order: 1;
+        }
+        .history-panel {
+             order: 2;
         }
         .task-tree {
             list-style-type: none;
@@ -620,6 +649,32 @@ const HTML_TEMPLATE_HEADER: &str = r#"<!DOCTYPE html>
             color: #666;
             margin-top: 5px;
         }
+        .history-list {
+            list-style-type: none;
+            padding-left: 0;
+            max-height: 400px;
+            overflow-y: auto;
+        }
+        .history-item {
+            border-bottom: 1px solid #eee;
+            padding: 8px 0;
+            font-size: 0.9em;
+            display: flex;
+            gap: 10px;
+        }
+        .history-ts {
+            color: #7f8c8d;
+            min-width: 160px;
+            white-space: nowrap;
+        }
+        .history-action {
+            font-weight: bold;
+            color: #3498db;
+        }
+        .history-details {
+            color: #555;
+            flex-grow: 1;
+        }
     </style>
 </head>
 <body>
@@ -636,6 +691,9 @@ const HTML_TEMPLATE_HEADER: &str = r#"<!DOCTYPE html>
         </div>
     </div>
     <div class="container">
+        <!-- HISTORY PANEL -->
+
+        <div class="plan-section">
 "#;
 
 // HTML template footer with EventSource JavaScript for reactive refreshing

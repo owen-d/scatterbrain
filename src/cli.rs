@@ -642,7 +642,7 @@ fn create_example_tasks(context: &mut Context) {
         .into_inner();
 
     // Reset to root
-    context.move_to(vec![]).inner();
+    context.move_to(vec![0, 0, 0]).inner();
 }
 
 /// Print a distilled context from any PlanResponse

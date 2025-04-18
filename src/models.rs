@@ -2,7 +2,9 @@
 //!
 //! This module contains the core data types and business logic for the scatterbrain tool.
 
+use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
+use std::collections::VecDeque;
 use std::sync::{Arc, Mutex};
 
 // Re-export levels from the levels module
@@ -76,6 +78,24 @@ impl Task {
     /// Gets the level index if it's explicitly set
     pub fn level_index(&self) -> Option<usize> {
         self.level_index
+    }
+}
+
+/// Represents a single state transition event
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TransitionLogEntry {
+    pub timestamp: DateTime<Utc>,
+    pub action: String,
+    pub details: Option<String>,
+}
+
+impl TransitionLogEntry {
+    pub fn new(action: String, details: Option<String>) -> Self {
+        Self {
+            timestamp: Utc::now(),
+            action,
+            details,
+        }
     }
 }
 
@@ -166,20 +186,42 @@ pub fn parse_index(index_str: &str) -> Result<Index, Box<dyn std::error::Error>>
 pub struct Context {
     plan: Plan,
     cursor: Index,
+    history: VecDeque<TransitionLogEntry>,
 }
+
+// Define the maximum size for the history buffer
+const MAX_HISTORY_SIZE: usize = 20;
 
 impl Context {
     /// Creates a new context with the given plan
     pub fn new(plan: Plan) -> Self {
         Self {
             plan,
-            cursor: Vec::new(), // Start at root
+            cursor: Vec::new(),                                 // Start at root
+            history: VecDeque::with_capacity(MAX_HISTORY_SIZE), // Initialize history
         }
+    }
+
+    /// Logs a state transition, maintaining the history buffer size.
+    fn log_transition(&mut self, action: String, details: Option<String>) {
+        if self.history.len() == MAX_HISTORY_SIZE {
+            self.history.pop_front(); // Remove the oldest entry
+        }
+        self.history
+            .push_back(TransitionLogEntry::new(action, details));
     }
 
     // Task creation and navigation
     /// Adds a new task with the given description
     pub fn add_task(&mut self, description: String) -> PlanResponse<(Task, Index)> {
+        self.log_transition(
+            "add_task".to_string(),
+            Some(format!(
+                "Adding task: '{}' to parent index {:?}",
+                description, self.cursor
+            )),
+        );
+
         let task = Task::new(description);
         let new_index;
         let task_clone = task.clone();
@@ -207,6 +249,11 @@ impl Context {
 
     /// Moves to the task at the given index
     pub fn move_to(&mut self, index: Index) -> PlanResponse<Option<String>> {
+        self.log_transition(
+            "move_to".to_string(),
+            Some(format!("Moving cursor to index: {:?}", index)),
+        );
+
         // Validate the index
         if index.is_empty() {
             self.cursor = Vec::new();
@@ -230,6 +277,11 @@ impl Context {
     // Task state management
     /// Completes the task at the given index
     pub fn complete_task(&mut self, index: Index) -> PlanResponse<bool> {
+        self.log_transition(
+            "complete_task".to_string(),
+            Some(format!("Completing task at index: {:?}", index)),
+        );
+
         // First, get a clone of the task for generating suggestions
         let task_clone_opt = self.get_task(index.clone()).map(|t| t.clone());
 
@@ -263,6 +315,14 @@ impl Context {
         index: Index,
         level_index: usize,
     ) -> PlanResponse<Result<(), String>> {
+        self.log_transition(
+            "change_level".to_string(),
+            Some(format!(
+                "Changing level for task {:?} to {}",
+                index, level_index
+            )),
+        );
+
         // Validate: the level must exist
         if level_index >= self.plan.level_count() {
             return PlanResponse::new(
@@ -404,6 +464,11 @@ impl Context {
 
     /// Sets the current level by trimming the cursor
     pub fn set_current_level(&mut self, level: usize) {
+        self.log_transition(
+            "set_current_level".to_string(),
+            Some(format!("Setting current level to: {}", level)),
+        );
+
         while self.cursor.len() > level {
             self.cursor.pop();
         }
@@ -557,6 +622,7 @@ impl Context {
             current_task_opt,
             current_level,
             levels,
+            self.history.iter().cloned().collect(),
         );
 
         PlanResponse::new((), distilled)
@@ -624,6 +690,8 @@ pub struct DistilledContext {
     pub current_level: Option<Level>,
     /// All available abstraction levels
     pub levels: Vec<Level>,
+    /// Recent state transition history
+    pub transition_history: Vec<TransitionLogEntry>,
 }
 
 impl DistilledContext {
@@ -634,6 +702,7 @@ impl DistilledContext {
         current_task: Option<Task>,
         current_level: Option<Level>,
         levels: Vec<Level>,
+        transition_history: Vec<TransitionLogEntry>,
     ) -> Self {
         Self {
             usage_summary,
@@ -641,6 +710,7 @@ impl DistilledContext {
             current_task,
             current_level,
             levels,
+            transition_history,
         }
     }
 }
@@ -988,6 +1058,75 @@ mod tests {
         // Verify the level was changed
         let task = context.get_task(task_index).unwrap();
         assert_eq!(task.level_index(), Some(0));
+    }
+
+    #[test]
+    fn test_transition_history_logging() {
+        // Create a plan with default levels
+        let plan = Plan::new(default_levels());
+        let mut context = Context::new(plan);
+
+        // Initial state: history should be empty
+        assert!(context.history.is_empty());
+
+        // Perform some actions
+        let task1_index = context.add_task("Task 1".to_string()).into_inner().1;
+        let history_len_after_add1 = context.history.len();
+        assert_eq!(
+            history_len_after_add1, 1,
+            "History should have 1 entry after first add"
+        );
+        assert_eq!(context.history.back().unwrap().action, "add_task");
+
+        context.move_to(task1_index.clone());
+        let history_len_after_move = context.history.len();
+        assert_eq!(
+            history_len_after_move, 2,
+            "History should have 2 entries after move"
+        );
+        assert_eq!(context.history.back().unwrap().action, "move_to");
+
+        context.add_task("Subtask 1".to_string());
+        let history_len_after_add2 = context.history.len();
+        assert_eq!(
+            history_len_after_add2, 3,
+            "History should have 3 entries after second add"
+        );
+        assert_eq!(context.history.back().unwrap().action, "add_task");
+
+        context.complete_task(vec![0, 0]); // Complete Subtask 1
+        let history_len_after_complete = context.history.len();
+        assert_eq!(
+            history_len_after_complete, 4,
+            "History should have 4 entries after complete"
+        );
+        assert_eq!(context.history.back().unwrap().action, "complete_task");
+
+        context.change_level(task1_index, 0);
+        let history_len_after_change_level = context.history.len();
+        assert_eq!(
+            history_len_after_change_level, 5,
+            "History should have 5 entries after change_level"
+        );
+        assert_eq!(context.history.back().unwrap().action, "change_level");
+
+        context.set_current_level(0);
+        let history_len_after_set_level = context.history.len();
+        assert_eq!(
+            history_len_after_set_level, 6,
+            "History should have 6 entries after set_current_level"
+        );
+        assert_eq!(context.history.back().unwrap().action, "set_current_level");
+
+        // Test buffer limit
+        for i in 0..MAX_HISTORY_SIZE + 5 {
+            context.add_task(format!("Filler task {}", i));
+        }
+        assert_eq!(
+            context.history.len(),
+            MAX_HISTORY_SIZE,
+            "History should not exceed MAX_HISTORY_SIZE"
+        );
     }
 
     #[test]
