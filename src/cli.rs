@@ -347,11 +347,18 @@ fn print_task(task: &crate::models::Task, index: Vec<usize>) {
         .collect::<Vec<_>>()
         .join(".");
 
+    let level_str = if let Some(level_index) = task.level_index() {
+        format!("level: {}", level_index)
+    } else {
+        "level: unknown".to_string()
+    };
+
     // Print the current task
     println!(
-        "{}[{}] {} (completed: {})",
+        "{}(index: [{}]) ({}), {} (completed: {})",
         indent,
         index_str,
+        level_str,
         task.description(),
         task.is_completed()
     );
