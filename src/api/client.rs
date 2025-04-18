@@ -8,7 +8,7 @@ use reqwest::{Client as ReqwestClient, Error as ReqwestError};
 use serde::Deserialize;
 
 use crate::models;
-use crate::models::{parse_index, DistilledContext, Index, PlanResponse};
+use crate::models::Index;
 
 use super::server::{AddTaskRequest, ChangeLevelRequest, MoveToRequest};
 
@@ -133,9 +133,7 @@ impl Client {
     }
 
     /// Get the distilled context
-    pub async fn get_distilled_context(
-        &self,
-    ) -> Result<models::PlanResponse<DistilledContext>, ClientError> {
+    pub async fn get_distilled_context(&self) -> Result<models::PlanResponse<()>, ClientError> {
         let url = format!("{}/api/distilled", self.config.base_url);
         let response = self.http_client.get(&url).send().await?;
 
@@ -146,8 +144,7 @@ impl Client {
             )));
         }
 
-        let api_response: ApiResponse<models::PlanResponse<DistilledContext>> =
-            response.json().await?;
+        let api_response: ApiResponse<models::PlanResponse<()>> = response.json().await?;
 
         if api_response.success {
             match api_response.data {
@@ -167,11 +164,19 @@ impl Client {
     pub async fn add_task(
         &self,
         description: String,
-    ) -> Result<models::PlanResponse<Option<(models::Task, Index)>>, ClientError> {
+    ) -> Result<models::PlanResponse<(models::Task, Index)>, ClientError> {
         let url = format!("{}/api/task", self.config.base_url);
         let request = AddTaskRequest { description };
         let response = self.http_client.post(&url).json(&request).send().await?;
-        let api_response: ApiResponse<models::PlanResponse<Option<(models::Task, Index)>>> =
+
+        if !response.status().is_success() {
+            return Err(ClientError::Api(format!(
+                "HTTP error: {}",
+                response.status()
+            )));
+        }
+
+        let api_response: ApiResponse<models::PlanResponse<(models::Task, Index)>> =
             response.json().await?;
 
         if api_response.success {
@@ -253,13 +258,14 @@ impl Client {
         &self,
         index: Index,
         level_index: usize,
-    ) -> Result<models::PlanResponse<()>, ClientError> {
+    ) -> Result<models::PlanResponse<Result<(), String>>, ClientError> {
         let url = format!("{}/api/task/level", self.config.base_url);
         let request = ChangeLevelRequest { index, level_index };
         let response = self.http_client.post(&url).json(&request).send().await?;
 
         if response.status().is_success() {
-            let api_response: ApiResponse<models::PlanResponse<()>> = response.json().await?;
+            let api_response: ApiResponse<models::PlanResponse<Result<(), String>>> =
+                response.json().await?;
             if api_response.success {
                 match api_response.data {
                     Some(plan_response) => Ok(plan_response),

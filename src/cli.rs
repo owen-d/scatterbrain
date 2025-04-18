@@ -8,10 +8,7 @@ use std::io;
 
 use crate::{
     api::{serve, Client, ClientConfig, ClientError, ServerConfig},
-    models::{
-        default_levels, parse_index, Context, Core, DistilledContext, Plan, PlanResponse,
-        TaskTreeNode,
-    },
+    models::{default_levels, parse_index, Context, Core, Plan, PlanResponse, TaskTreeNode},
 };
 
 #[derive(Parser)]
@@ -126,24 +123,27 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
 
         Commands::Task { command } => {
             let client = create_client(&cli.server);
-
-            match command {
+            let result = match command {
                 TaskCommands::Add { description, level } => {
                     // Add the task
                     let response = client.add_task(description.clone()).await?;
-                    let (_task, index) = response.inner().as_ref().unwrap();
 
-                    if let Err(e) = client.change_level(index.clone(), *level).await {
+                    // Get the task and index from the response
+                    let (_task, index) = response.inner();
+
+                    // Change the level
+                    let level_result = client.change_level(index.clone(), *level).await;
+
+                    if let Err(e) = level_result {
                         println!("Warning: Could not set level: {}", e);
+                        println!("Added task: \"{}\" at index: {:?}", description, index);
                     } else {
                         println!(
                             "Added task: \"{}\" with level {} at index: {:?}",
                             description, level, index
                         );
-                        return Ok(());
                     }
 
-                    println!("Added task: \"{}\" at index: {:?}", description, index);
                     Ok(())
                 }
 
@@ -181,7 +181,9 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
 
                     Ok(())
                 }
-            }
+            };
+
+            result
         }
 
         Commands::Move { index } => {
@@ -208,13 +210,14 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
 
             let plan_response = client.get_plan().await?;
             print_plan_response(&plan_response);
+
             Ok(())
         }
 
         Commands::Current => {
             let client = create_client(&cli.server);
 
-            match client.get_current().await {
+            let result = match client.get_current().await {
                 Ok(current_response) => {
                     print_response(&current_response, |current| {
                         // Check if we have a current task
@@ -252,7 +255,9 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
                     Ok(())
                 }
                 Err(e) => Err(e.into()),
-            }
+            };
+
+            result
         }
 
         Commands::Distilled => {
@@ -265,6 +270,13 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
 
         Commands::Guide => {
             print_guide();
+
+            // Only display distilled context if a server is running
+            let client = create_client(&cli.server);
+            if let Ok(distilled_response) = client.get_distilled_context().await {
+                print_distilled_context_response(&distilled_response);
+            }
+
             Ok(())
         }
 
@@ -307,6 +319,9 @@ where
     if let Some(reminder) = &response.reminder {
         println!("\nReminder: {}", reminder);
     }
+
+    // Print the distilled context
+    print_distilled_context_response(response);
 }
 
 fn print_plan_response(response: &crate::models::PlanResponse<crate::models::Plan>) {
@@ -541,94 +556,98 @@ COMMON MISTAKES TO AVOID:
 
 /// Creates an example task tree for UI testing
 fn create_example_tasks(context: &mut Context) {
-    // Create some top-level tasks
-    let project_index = context
-        .add_task("Build Web Application".to_string())
-        .into_inner()
-        .1;
-    let docs_index = context
-        .add_task("Write Documentation".to_string())
-        .into_inner()
-        .1;
-    let test_index = context
-        .add_task("Test Application".to_string())
-        .into_inner()
-        .1;
+    // Create top-level tasks (level 0 - Business Strategy)
+    let result = context.add_task("Build Web Application".to_string());
+    let (_, idx) = result.into_inner();
+    context.move_to(idx).inner();
 
-    // Add subtasks to the project
-    let move_response = context.move_to(project_index.clone());
-    assert!(move_response.inner().is_some());
-    let frontend_index = context
-        .add_task("Implement Frontend".to_string())
-        .into_inner()
-        .1;
-    let backend_index = context
-        .add_task("Implement Backend".to_string())
-        .into_inner()
-        .1;
-    let _db_index = context
-        .add_task("Set up Database".to_string())
-        .into_inner()
-        .1;
+    // Level 1 - Project Planning
+    // Add subtasks to "Build Web Application"
+    let result = context.add_task("Implement Frontend".to_string());
+    let (_, idx) = result.into_inner();
+    context.move_to(idx).inner();
 
-    // Add subtasks to frontend
-    let move_response = context.move_to(frontend_index.clone());
-    assert!(move_response.inner().is_some());
-    let ui_index = context
-        .add_task("Design UI Components".to_string())
-        .into_inner()
-        .1;
-    let _auth_ui_index = context
+    // Level 2 - Implementation
+    // Add subtasks to "Implement Frontend"
+    let result = context.add_task("Design UI Components".to_string());
+    let (_, idx) = result.into_inner();
+    context.move_to(idx).inner();
+
+    // Level 3 - Implementation Details
+    // Add subtasks to "Design UI Components"
+    context
         .add_task("Implement User Authentication UI".to_string())
-        .into_inner()
-        .1;
-    context.add_task("Create Dashboard View".to_string());
+        .into_inner();
 
-    // Mark UI task as completed
-    context.complete_task(ui_index);
+    // Move back up to "Implement Frontend"
+    context.move_to(vec![0, 0, 0]).inner();
 
-    // Add subtasks to backend
-    let move_response = context.move_to(backend_index.clone());
-    assert!(move_response.inner().is_some());
-    context.add_task("Set up API Routes".to_string());
-    let auth_logic_index = context
+    // Back to parent
+    context.move_to(vec![0, 0]).inner();
+
+    // Add another subtask to "Implement Frontend"
+    context
+        .add_task("Set up State Management".to_string())
+        .into_inner();
+
+    // Move back to root
+    context.move_to(vec![0]).inner();
+
+    // Add "Implement Backend" as subtask of "Build Web Application"
+    let result = context.add_task("Implement Backend".to_string());
+    let (_, idx) = result.into_inner();
+    context.move_to(idx).inner();
+
+    // Add backend tasks
+    let result = context.add_task("Set up Database".to_string());
+    let (_, idx) = result.into_inner();
+    context.move_to(idx).inner();
+
+    // Add some API endpoint tasks
+    context
+        .add_task("Create API Endpoints".to_string())
+        .into_inner();
+    context
         .add_task("Implement Authentication Logic".to_string())
-        .into_inner()
-        .1;
-    let data_index = context
+        .into_inner();
+    context
         .add_task("Create Data Models".to_string())
-        .into_inner()
-        .1;
+        .into_inner();
 
-    // Add subtasks to data models
-    let move_response = context.move_to(data_index.clone());
-    assert!(move_response.inner().is_some());
-    context.add_task("User Model".to_string());
-    let _product_index = context.add_task("Product Model".to_string()).into_inner().1;
-    context.add_task("Order Model".to_string());
+    // Move back to "Set up Database"
+    context.move_to(vec![0, 1, 0]).inner();
 
-    // Add subtasks to documentation
-    let move_response = context.move_to(docs_index.clone());
-    assert!(move_response.inner().is_some());
-    context.add_task("API Documentation".to_string());
-    context.add_task("User Manual".to_string());
-    context.add_task("Developer Guide".to_string());
+    // Add database schema tasks
+    let result = context.add_task("Product Model".to_string());
+    let (_, idx) = result.into_inner();
+    context.move_to(idx).inner();
 
-    // Add subtasks to testing
-    let move_response = context.move_to(test_index.clone());
-    assert!(move_response.inner().is_some());
-    context.add_task("Unit Tests".to_string());
-    context.add_task("Integration Tests".to_string());
-    context.add_task("Performance Tests".to_string());
+    // Add some fields
+    context
+        .add_task("Define Product Fields".to_string())
+        .into_inner();
+    context
+        .add_task("Implement Relationships".to_string())
+        .into_inner();
 
-    // Set a nested task as the current task
-    // This will highlight the auth logic task in the backend section
-    let move_response = context.move_to(auth_logic_index);
-    assert!(move_response.inner().is_some());
+    // Move back to root level
+    context.move_to(vec![0]).inner();
+
+    // Add a few more top level tasks
+    context
+        .add_task("Write Documentation".to_string())
+        .into_inner();
+    context
+        .add_task("Test Application".to_string())
+        .into_inner();
+
+    // Reset to root
+    context.move_to(vec![]).inner();
 }
 
-fn print_distilled_context_response(response: &PlanResponse<DistilledContext>) {
-    let context = response.inner();
+/// Print a distilled context from any PlanResponse
+fn print_distilled_context_response<T>(response: &PlanResponse<T>) {
+    let context = &response.distilled_context;
 
     println!("\n=== DISTILLED CONTEXT ===\n");
 

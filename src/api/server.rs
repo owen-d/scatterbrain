@@ -9,7 +9,6 @@ use std::task::{Context, Poll};
 
 use axum::{
     extract::State,
-    http::StatusCode,
     response::{Html, IntoResponse},
     routing::{get, post},
     Json, Router,
@@ -20,7 +19,7 @@ use tokio::net::TcpListener;
 use tower_http::cors::{Any, CorsLayer};
 
 use crate::models::PlanResponse;
-use crate::models::{self, DistilledContext, Index};
+use crate::models::{self, Index};
 use crate::Core;
 
 /// Request to add a new task
@@ -120,7 +119,7 @@ pub async fn serve(core: Core, config: ServerConfig) -> Result<(), Box<dyn std::
 }
 
 // Handler implementations
-async fn get_plan(State(core): State<Core>) -> JSONResp<Option<models::Plan>> {
+async fn get_plan(State(core): State<Core>) -> JSONResp<models::Plan> {
     let plan_response = core.get_plan();
     Json(ApiResponse::success(plan_response))
 }
@@ -130,7 +129,7 @@ async fn get_current(State(core): State<Core>) -> JSONResp<Option<models::Curren
     Json(ApiResponse::success(response))
 }
 
-async fn get_distilled_context(State(core): State<Core>) -> JSONResp<DistilledContext> {
+async fn get_distilled_context(State(core): State<Core>) -> JSONResp<()> {
     let response = core.distilled_context();
     Json(ApiResponse::success(response))
 }
@@ -138,13 +137,9 @@ async fn get_distilled_context(State(core): State<Core>) -> JSONResp<DistilledCo
 async fn add_task(
     State(core): State<Core>,
     Json(payload): Json<AddTaskRequest>,
-) -> JSONResp<Option<(models::Task, Index)>> {
+) -> JSONResp<(models::Task, Index)> {
     let response = core.add_task(payload.description);
-
-    match response.inner() {
-        Some(_) => Json(ApiResponse::success(response)),
-        None => Json(ApiResponse::error("Failed to add task".to_string())),
-    }
+    Json(ApiResponse::success(response))
 }
 
 async fn complete_task(State(core): State<Core>) -> JSONResp<bool> {
@@ -160,13 +155,9 @@ async fn complete_task(State(core): State<Core>) -> JSONResp<bool> {
 async fn change_level(
     State(core): State<Core>,
     Json(payload): Json<ChangeLevelRequest>,
-) -> JSONResp<()> {
+) -> JSONResp<Result<(), String>> {
     let response = core.change_level(payload.index, payload.level_index);
-
-    match response.inner().clone() {
-        Ok(_) => Json(ApiResponse::success(response.replace(()))),
-        Err(e) => Json(ApiResponse::error(e)),
-    }
+    Json(ApiResponse::success(response))
 }
 
 async fn move_to(
@@ -258,21 +249,11 @@ async fn ui_handler(State(core): State<Core>) -> impl IntoResponse {
     let plan_response = core.get_plan();
     let current_response = core.current();
     let current_opt = current_response.inner();
+    let plan = plan_response.inner();
 
-    match plan_response.inner() {
-        Some(plan) => {
-            let html = render_ui_template(&plan, current_opt.as_ref());
-            Html(html).into_response()
-        }
-        None => {
-            // If we can't get a plan, return an error
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                "Error accessing application state".to_string(),
-            )
-                .into_response()
-        }
-    }
+    // Render the UI template
+    let html = render_ui_template(plan, current_opt.as_ref());
+    Html(html).into_response()
 }
 
 // Render the UI HTML template

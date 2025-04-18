@@ -202,17 +202,7 @@ impl Context {
             new_index = task_index_vec;
         }
 
-        PlanResponse::new(
-            (task_clone, new_index),
-            vec![
-                "move to the new task".to_string(),
-                "add a subtask".to_string(),
-            ],
-            Some(
-                "Next, consider breaking this task down further or organizing its level"
-                    .to_string(),
-            ),
-        )
+        PlanResponse::new((task_clone, new_index), self.distilled_context().context())
     }
 
     /// Moves to the task at the given index
@@ -220,11 +210,7 @@ impl Context {
         // Validate the index
         if index.is_empty() {
             self.cursor = Vec::new();
-            return PlanResponse::new(
-                Some("root".to_string()),
-                vec!["add a task".to_string(), "view the plan".to_string()],
-                Some("You're at the root level of your plan".to_string()),
-            );
+            return PlanResponse::new(Some("root".to_string()), self.distilled_context().context());
         }
 
         // Check if the index is valid
@@ -232,25 +218,12 @@ impl Context {
         if let Some(task) = task_opt {
             let description = task.description().to_string();
 
-            // Get the level index - either from the task or inferred from depth
-            let level_index = task.level_index().unwrap_or(index.len().min(3));
-
-            // Get level-specific followups
-            let followups = get_level_specific_followups(task, level_index, self.plan.levels());
-
-            // Get level-specific reminder
-            let reminder = get_level_specific_reminder(task, level_index, self.plan.levels());
-
             // Set cursor after we're done with task operations
             self.cursor = index;
 
-            PlanResponse::new(Some(description), followups, reminder)
+            PlanResponse::new(Some(description), self.distilled_context().context())
         } else {
-            PlanResponse::new(
-                None,
-                vec!["view the plan".to_string()],
-                Some("Invalid task index. Try viewing the plan to find a valid task.".to_string()),
-            )
+            PlanResponse::new(None, self.distilled_context().context())
         }
     }
 
@@ -275,29 +248,12 @@ impl Context {
                 task_clone.complete();
 
                 // Get level information
-                let level_index = task_clone.level_index().unwrap_or(index.len().min(3));
-                let levels = self.plan.levels();
-
-                // Generate suggestions
-                let followups = get_level_specific_followups(&task_clone, level_index, levels);
-
-                // For task completion, always use an encouraging reminder
-                let reminder = Some("Great progress! What's next on your plan?".to_string());
-
-                return PlanResponse::new(success, followups, reminder);
+                return PlanResponse::new(success, self.distilled_context().context());
             }
         }
 
         // Fallback if task not found or clone unavailable
-        PlanResponse::new(
-            success,
-            vec!["view the plan".to_string()],
-            Some(if success {
-                "Great progress! What's next on your plan?".to_string()
-            } else {
-                "Task not found. Try viewing the plan to find a valid task.".to_string()
-            }),
-        )
+        PlanResponse::new(success, self.distilled_context().context())
     }
 
     /// Changes the level of a task at the given index,
@@ -311,11 +267,7 @@ impl Context {
         if level_index >= self.plan.level_count() {
             return PlanResponse::new(
                 Err(format!("Level index {} is out of bounds", level_index)),
-                vec!["view the plan".to_string()],
-                Some(format!(
-                    "Available levels are 0-{}",
-                    self.plan.level_count() - 1
-                )),
+                self.distilled_context().context(),
             );
         }
 
@@ -331,8 +283,7 @@ impl Context {
                             "Child task cannot have a higher abstraction level ({}) than its parent ({})",
                             level_index, parent_level
                         )),
-                        vec!["change parent level first".to_string()],
-                        Some("Remember that parent tasks should have equal or higher abstraction levels than their children".to_string()),
+                        self.distilled_context().context(),
                     );
                 }
             }
@@ -360,45 +311,18 @@ impl Context {
         // Validate that no child has a higher level
         if let Some(task) = self.get_task(index.clone()) {
             if let Err(e) = check_children(task, index.len(), level_index) {
-                return PlanResponse::new(
-                    Err(e),
-                    vec!["change child levels first".to_string()],
-                    Some(
-                        "Change the levels of child tasks before changing the parent task level"
-                            .to_string(),
-                    ),
-                );
+                return PlanResponse::new(Err(e), self.distilled_context().context());
             }
         }
 
         // Apply the change
-        let task_opt = self.get_task(index.clone());
-        if let Some(task) = task_opt {
-            // Clone the task and get level information
-            let mut task_clone = task.clone();
-            let levels = self.plan.levels().to_vec();
-
-            // Get the mutable task and set the level
-            if let Some(task_mut) = self.get_task_mut(index) {
-                task_mut.set_level(level_index);
-            }
-
-            // Update our cloned task with the new level (for generating suggestions)
-            task_clone.set_level(level_index);
-
-            // Generate level-specific followups using our clone
-            let followup_suggestions =
-                get_level_specific_followups(&task_clone, level_index, &levels);
-
-            // Generate level-specific reminder using our clone
-            let reminder = get_level_specific_reminder(&task_clone, level_index, &levels);
-
-            PlanResponse::new(Ok(()), followup_suggestions, reminder)
+        if let Some(task) = self.get_task_mut(index.clone()) {
+            task.set_level(level_index);
+            PlanResponse::new(Ok(()), self.distilled_context().context())
         } else {
             PlanResponse::new(
                 Err("Task not found".to_string()),
-                vec!["view the plan".to_string()],
-                Some("Check the plan to find a valid task index".to_string()),
+                self.distilled_context().context(),
             )
         }
     }
@@ -465,31 +389,15 @@ impl Context {
     pub fn get_current_index(&self) -> PlanResponse<Index> {
         // Get the current task and level for better context
         let current_task_opt = self.get_current_task();
-        if let Some(current_task) = current_task_opt {
-            let level_index = current_task
-                .level_index()
-                .unwrap_or(self.cursor.len().min(3));
-            let levels = self.plan.levels();
-
-            // Use helper functions to generate context-aware followups and reminders
-            let followups = get_level_specific_followups(current_task, level_index, levels);
-            let reminder = get_level_specific_reminder(current_task, level_index, levels);
-
-            PlanResponse::new(self.cursor.clone(), followups, reminder)
+        if let Some(_current_task) = current_task_opt {
+            PlanResponse::new(self.cursor.clone(), self.distilled_context().context())
         } else {
             // Fallback if no current task
-            PlanResponse::new(
-                self.cursor.clone(),
-                vec![
-                    "move to different task".to_string(),
-                    "add a subtask".to_string(),
-                ],
-                Some("Consider where you are in the task hierarchy".to_string()),
-            )
+            PlanResponse::new(self.cursor.clone(), self.distilled_context().context())
         }
     }
 
-    /// Gets the current level based on cursor depth
+    /// Gets the current task and level based on cursor depth
     pub fn get_current_level(&self) -> usize {
         self.get_current_index().inner().len()
     }
@@ -519,19 +427,7 @@ impl Context {
     // Plan access
     /// Gets the plan
     pub fn get_plan(&self) -> PlanResponse<Plan> {
-        // Get the root task to generate better guidance
-        let root_task = self.plan.root();
-        let levels = self.plan.levels();
-
-        // For the plan view, we want to encourage high-level thinking
-        // So we'll use level 0 (high-level planning) for guidance
-        let level_index = 0;
-
-        // Use our helper functions
-        let followups = get_level_specific_followups(root_task, level_index, levels);
-        let reminder = Some("Focus on one level of abstraction at a time".to_string());
-
-        PlanResponse::new(self.plan.clone(), followups, reminder)
+        PlanResponse::new(self.plan.clone(), self.distilled_context().context())
     }
 
     /// Gets the current task with history
@@ -627,7 +523,7 @@ impl Context {
     }
 
     /// Creates a distilled context with focused information about the current planning state
-    pub fn distilled_context(&self) -> PlanResponse<DistilledContext> {
+    pub fn distilled_context(&self) -> PlanResponse<()> {
         // Create the usage summary
         let usage_summary = "Scatterbrain is a hierarchical planning tool that helps break down complex tasks into manageable pieces. Use 'task add' to add tasks, 'move <index>' to navigate, and 'task complete' to mark tasks as done. Tasks are organized in levels from high-level planning to specific implementation details.".to_string();
 
@@ -651,20 +547,6 @@ impl Context {
                 .unwrap_or((None, None))
         };
 
-        // Create followup suggestions based on current context
-        let followups = if current_task_opt.is_some() {
-            vec![
-                "add a subtask".to_string(),
-                "complete this task".to_string(),
-                "view the plan".to_string(),
-            ]
-        } else {
-            vec!["add a task".to_string(), "view the plan".to_string()]
-        };
-
-        // Create a reminder about the distilled context
-        let reminder = Some("Use this distilled context to maintain awareness of your current focus and the overall structure of your plan.".to_string());
-
         // Create the distilled context with all components
         let distilled = DistilledContext {
             usage_summary,
@@ -673,7 +555,7 @@ impl Context {
             current_level,
         };
 
-        PlanResponse::new(distilled, followups, reminder)
+        PlanResponse::new((), distilled)
     }
 }
 
@@ -682,14 +564,16 @@ pub struct PlanResponse<T> {
     pub res: T,
     pub suggested_followups: Vec<String>,
     pub reminder: Option<String>,
+    pub distilled_context: DistilledContext,
 }
 
 impl<T> PlanResponse<T> {
-    pub fn new(res: T, suggested_followups: Vec<String>, reminder: Option<String>) -> Self {
+    pub fn new(res: T, distilled_context: DistilledContext) -> Self {
         Self {
             res,
-            suggested_followups,
-            reminder,
+            suggested_followups: Vec::new(),
+            reminder: None,
+            distilled_context,
         }
     }
 
@@ -702,7 +586,16 @@ impl<T> PlanResponse<T> {
     }
 
     pub fn replace<B>(self, res: B) -> PlanResponse<B> {
-        PlanResponse::new(res, self.suggested_followups, self.reminder)
+        PlanResponse {
+            res,
+            suggested_followups: Vec::new(),
+            reminder: None,
+            distilled_context: self.distilled_context,
+        }
+    }
+
+    pub fn context(self) -> DistilledContext {
+        self.distilled_context
     }
 }
 
@@ -715,7 +608,7 @@ pub struct Current {
 }
 
 /// Distilled context containing focused information about the current planning state
-#[derive(Clone, Serialize, Deserialize)]
+#[derive(Clone, Serialize, Deserialize, Debug)]
 pub struct DistilledContext {
     /// A summary of what scatterbrain is and how to use it
     pub usage_summary: String,
@@ -728,7 +621,7 @@ pub struct DistilledContext {
 }
 
 /// A node in the task tree for the distilled context
-#[derive(Clone, Serialize, Deserialize)]
+#[derive(Clone, Serialize, Deserialize, Debug)]
 pub struct TaskTreeNode {
     /// The description of the task
     pub description: String,
@@ -779,27 +672,21 @@ impl Core {
         result
     }
 
-    pub fn get_plan(&self) -> PlanResponse<Option<Plan>> {
+    pub fn get_plan(&self) -> PlanResponse<Plan> {
         let context = match self.inner.lock() {
             Ok(guard) => guard,
             Err(poisoned) => poisoned.into_inner(),
         };
-
-        let plan_response = context.get_plan();
-        let followups = plan_response.suggested_followups.clone();
-        let reminder = plan_response.reminder.clone();
-        let plan = Some(plan_response.into_inner());
-
-        PlanResponse::new(plan, followups, reminder)
+        context.get_plan()
     }
 
     pub fn current(&self) -> PlanResponse<Option<Current>> {
         self.with_context(|context| {
-            let index_response = context.get_current_index();
-            let index = index_response.inner().clone();
-
-            let followups = index_response.suggested_followups.clone();
-            let reminder = index_response.reminder.clone();
+            let PlanResponse {
+                res: index,
+                distilled_context,
+                ..
+            } = context.get_current_index();
 
             let current_opt = context
                 .get_current_with_history()
@@ -810,17 +697,12 @@ impl Core {
                     history,
                 });
 
-            PlanResponse::new(current_opt, followups, reminder)
+            PlanResponse::new(current_opt, distilled_context)
         })
     }
 
-    pub fn add_task(&self, description: String) -> PlanResponse<Option<(Task, Index)>> {
-        self.with_context(|context| {
-            let response = context.add_task(description);
-            let followups = response.suggested_followups.clone();
-            let reminder = response.reminder.clone();
-            PlanResponse::new(Some(response.into_inner()), followups, reminder)
-        })
+    pub fn add_task(&self, description: String) -> PlanResponse<(Task, Index)> {
+        self.with_context(|context| context.add_task(description))
     }
 
     pub fn complete_task(&self) -> PlanResponse<bool> {
@@ -857,128 +739,9 @@ impl Core {
     }
 
     /// Gets a distilled context with focused information about the current planning state
-    pub fn distilled_context(&self) -> PlanResponse<DistilledContext> {
+    /// This return type embeds () because the context is already embedded in the PlanResponse type
+    pub fn distilled_context(&self) -> PlanResponse<()> {
         self.with_context(|context| context.distilled_context())
-    }
-}
-
-// Helper functions for generating level-specific guidance
-/// Generates level-specific followup suggestions based on current task and level.
-/// Uses the level's abstraction focus and questions to provide relevant guidance.
-pub fn get_level_specific_followups(
-    task: &Task,
-    level_index: usize,
-    levels: &[Level],
-) -> Vec<String> {
-    // Start with some standard task-based followups
-    let mut followups = vec![];
-
-    // Add standard task management followups
-    if !task.is_completed() {
-        followups.push("complete this task".to_string());
-    }
-    followups.push("add a subtask".to_string());
-    if !task.subtasks().is_empty() {
-        followups.push("move to a subtask".to_string());
-    }
-
-    // Add level-specific followups
-    if level_index < levels.len() {
-        let level = &levels[level_index];
-
-        match level_index {
-            // Level 1: High-Level Planning
-            0 => {
-                followups.push("consider architectural implications".to_string());
-                followups.push("evaluate extensibility of this approach".to_string());
-                followups.push("check if abstractions are appropriate".to_string());
-            }
-            // Level 2: Isolation - Component Boundaries
-            1 => {
-                followups.push("ensure components can be completed independently".to_string());
-                followups.push("review component interfaces".to_string());
-                followups.push("verify modularity of boundaries".to_string());
-            }
-            // Level 3: Ordering - Sequencing Components
-            2 => {
-                followups.push("review task dependencies".to_string());
-                followups.push("check build order".to_string());
-                followups.push("identify critical paths".to_string());
-            }
-            // Level 4: Implementation - Specific Tasks
-            3 => {
-                followups.push("identify concrete next steps".to_string());
-                followups.push("consider edge cases".to_string());
-                followups.push("review implementation details".to_string());
-            }
-            // Default for custom levels
-            _ => {
-                followups.push(format!("consider {} level guidance", level.description()));
-            }
-        }
-
-        // Include a suggestion based on level questions
-        if let Some(question) = level.questions().first() {
-            followups.push(format!("reflect on: {}", question));
-        }
-    }
-
-    followups
-}
-
-/// Generates level-specific reminders based on current task and level.
-/// Uses the level's abstraction focus to provide context-specific guidance.
-pub fn get_level_specific_reminder(
-    task: &Task,
-    level_index: usize,
-    levels: &[Level],
-) -> Option<String> {
-    // First, handle task-specific reminders
-    if !task.is_completed() && !task.subtasks().is_empty() {
-        return Some("Remember to complete subtasks before marking this task as done".to_string());
-    }
-
-    // Then, provide level-specific guidance if available
-    if level_index < levels.len() {
-        let level = &levels[level_index];
-
-        // Extract the abstraction focus for this level
-        let focus = level.abstraction_focus();
-
-        // Create a shorter, more focused reminder based on the abstraction focus
-        let reminder = match level_index {
-            // Level 1: High-Level Planning
-            0 => format!(
-                "Maintain altitude. Focus on the big picture: {}",
-                focus.split('.').next().unwrap_or(focus)
-            ),
-            // Level 2: Isolation - Component Boundaries
-            1 => format!(
-                "Define clear boundaries between components: {}",
-                focus.split('.').next().unwrap_or(focus)
-            ),
-            // Level 3: Ordering - Sequencing Components
-            2 => format!(
-                "Think about sequence and progression: {}",
-                focus.split('.').next().unwrap_or(focus)
-            ),
-            // Level 4: Implementation - Specific Tasks
-            3 => format!(
-                "Focus on concrete, actionable steps: {}",
-                focus.split('.').next().unwrap_or(focus)
-            ),
-            // Default for custom levels
-            _ => format!("Level {} guidance: {}", level_index, level.description()),
-        };
-
-        return Some(reminder);
-    }
-
-    // Default reminder if we don't have level information
-    if !task.is_completed() {
-        Some("Focus on this task until it's completed".to_string())
-    } else {
-        Some("This task is already completed".to_string())
     }
 }
 
@@ -1211,7 +974,7 @@ mod tests {
 
         // Use add_task through Core
         let response = core.add_task("Task through Core".to_string());
-        let task_index = response.into_inner().unwrap().1;
+        let task_index = response.into_inner().1;
 
         // Move to the task
         let move_response = core.move_to(task_index.clone());
