@@ -372,40 +372,87 @@ fn print_guide() {
     let guide = r#"
 === SCATTERBRAIN GUIDE ===
 
-Scatterbrain is a hierarchical planning and task management tool designed to help agents
-systematically work through complex projects by breaking them down into manageable tasks.
+Scatterbrain is a hierarchical planning and task management tool designed to help
+break down complex projects into manageable tasks through multiple abstraction levels.
 
-== CONCEPTUAL MODEL ==
+== OVERVIEW ==
+
+Scatterbrain helps you:
+- Structure complex tasks in a logical hierarchy
+- Navigate between different levels of abstraction
+- Track progress and maintain focus
+- Adapt your plan as work progresses
+
+== ABSTRACTION LEVELS EXPLAINED ==
 
 Scatterbrain uses a multi-level approach to planning:
 
 1. High-level planning: Identifying architecture, scope, and approach
    - Focus on simplicity, extensibility, and good abstractions
    - Set the overall direction and boundaries of your project
+   - Ask: "What's the overall architecture?" "Which approach should we take?"
 
 2. Isolation: Breaking down the plan into discrete, independent parts
+   - Define boundaries between components
+   - Establish interfaces and contracts
    - Ensure each part can be completed and verified independently
-   - Create modular boundaries between pieces
+   - Ask: "What are the interfaces?" "How should we divide this into parts?"
 
 3. Ordering: Sequencing the parts in a logical flow
    - Start with foundational building blocks
-   - Progress toward more complex concepts
-   - Follow idiomatic patterns for the domain
+   - Identify dependencies between tasks
+   - Plan the critical path
+   - Ask: "What order should we implement these?" "Which parts come first?"
 
 4. Implementation: Converting each part into specific, actionable tasks
+   - Define concrete, actionable steps
+   - Detail exact implementation requirements
    - Make tasks independently completable
-   - Ensure tasks build upon each other
-   - Minimize execution risk between tasks
+   - Ask: "What specific changes are needed?" "What files need modification?"
 
-== WORKFLOW FOR AGENTS ==
+== TRANSITIONING BETWEEN LEVELS ==
+
+MOVING DOWN:
+  Level 1 → Level 2:
+  • When your high-level approach is clear
+  • When you're ready to define component boundaries
+  • When you need to establish contracts between components
+  
+  Level 2 → Level 3:
+  • When component boundaries are well-defined
+  • When you need to determine implementation sequence
+  • When you're ready to identify dependencies
+  
+  Level 3 → Level 4:
+  • When the implementation sequence is clear
+  • When you're ready to define specific tasks
+  • When you're prepared to execute the implementation plan
+
+MOVING UP:
+  Level 4 → Level 3:
+  • When you've completed implementation tasks
+  • When you need to reorganize remaining task sequence
+  • When you need to reprioritize work
+  
+  Level 3 → Level 2:
+  • When you discover issues with component interfaces
+  • When integration is more complex than expected
+  • When you need to redefine component boundaries
+  
+  Level 2 → Level 1:
+  • When you find fundamental flaws in the approach
+  • When components don't form a coherent system
+  • When you need to rethink the entire architecture
+
+== WORKFLOW GUIDE ==
 
 1. CREATE A PLAN AND NAVIGATE THE LEVELS
-   - Begin at Level 1 with high-level planning:
-     $ scatterbrain task add "Design system architecture"
+   - Begin at Level 0 with high-level planning:
+     $ scatterbrain task add --level 0 "Design system architecture"
      $ scatterbrain move 0
      
-   - Add subtasks at Level 2 to break down the approach:
-     $ scatterbrain task add "Identify core components"
+   - Add subtasks at appropriate levels:
+     $ scatterbrain task add --level 1 "Identify core components"
      $ scatterbrain move 0,0
      
    - Continue adding more granular tasks at deeper levels
@@ -417,6 +464,9 @@ Scatterbrain uses a multi-level approach to planning:
    - Focus on your current task:
      $ scatterbrain current
      
+   - Get a distilled context:
+     $ scatterbrain distilled
+     
    - Complete tasks when finished:
      $ scatterbrain task complete
      
@@ -424,60 +474,66 @@ Scatterbrain uses a multi-level approach to planning:
      $ scatterbrain move 1,2
 
 3. PROGRESSIVE REFINEMENT
-   - Start with broad strokes at Level 1
+   - Start with broad strokes at Level 0
    - Refine details as you move to deeper levels
    - Complete higher-level tasks only when all subtasks are done
    - Use completed tasks to validate your approach
 
-== AGENT PRODUCTIVITY TECHNIQUES ==
-
-1. FOCUS MANAGEMENT
-   - Work on one task at a time
-   - Use 'current' to maintain context between sessions
-   - Complete the current task before moving to another
-
-2. STRUCTURED THINKING
-   - Use Level 1 for "why" questions
-   - Use Level 2 for "what" questions
-   - Use Level 3 for "when" questions
-   - Use Level 4 for "how" questions
-
-3. ADAPTIVE PLANNING
-   - Revisit and adjust higher levels when assumptions change
-   - Add new tasks as you discover them
-   - Move between different branches as needed
-
-4. PROGRESS TRACKING
-   - Mark tasks as complete to see visible progress
-   - Use the plan view to identify stuck areas
-   - Balance work across different branches of the plan
-
 == COMMAND REFERENCE ==
 
 TASK MANAGEMENT:
-  $ scatterbrain task add "Task description"     Create new task
-  $ scatterbrain task add --level 0 "Task desc"  Create task with specific level
-  $ scatterbrain task complete                   Complete current task
-  $ scatterbrain task change-level 1             Change current task level
+  $ scatterbrain task add --level <LEVEL> "Task description"    Create new task (level is required)
+  $ scatterbrain task complete                                 Complete current task
+  $ scatterbrain task change-level <LEVEL_INDEX>               Change current task's abstraction level
   
 NAVIGATION:
-  $ scatterbrain move <INDEX>                    Navigate to a task
-                                                (e.g., 0 or 0,1,2)
-VIEWING:
-  $ scatterbrain plan                            View the full plan
-  $ scatterbrain current                         View current task
+  $ scatterbrain move <INDEX>                                  Navigate to a task (e.g., 0 or 0,1,2)
   
-HELP:
-  $ scatterbrain guide                           Show this guide
-  $ scatterbrain <COMMAND> --help                Show command help
+VIEWING:
+  $ scatterbrain plan                                          View the full plan with all tasks
+  $ scatterbrain current                                       View details of the current task
+  $ scatterbrain distilled                                     View a distilled context of your plan
+  
+SERVER MANAGEMENT:
+  $ scatterbrain serve                                         Start the API server on default port 3000
+  $ scatterbrain serve --port <PORT>                           Start the API server on a custom port
+  $ scatterbrain serve --example                               Start with example task tree for testing
+  
+HELP & UTILITIES:
+  $ scatterbrain guide                                         Show this guide
+  $ scatterbrain completions <SHELL>                           Generate shell completions
+  $ scatterbrain <COMMAND> --help                              Show help for a specific command
+  $ scatterbrain --server <URL>                                Connect to a custom server URL
 
-== TIPS FOR AGENTS ==
+== BEST PRACTICES ==
+
+PRODUCTIVITY TECHNIQUES:
+  • Focus on one task at a time
+  • Use 'current' and 'distilled' to maintain context
+  • Complete tasks before moving to another
+  • Revisit higher levels when assumptions change
+
+LEVEL USAGE:
+  • Use Level 0 for "why" questions
+  • Use Level 1 for "what" questions
+  • Use Level 2 for "when" questions
+  • Use Level 3 for "how" questions
+
+COMMON MISTAKES TO AVOID:
+  • Premature implementation detail: Diving into code specifics at Level 0
+  • Inconsistent abstractions: Mixing high-level and low-level concerns
+  • Abstraction resistance: Staying too high-level when details are needed
+  • Abstraction abandonment: Getting lost in details and forgetting the big picture
+  • Level skipping: Jumping from Level 0 to Level 3 without proper planning
+
+== TIPS ==
 
 - When stuck, move up a level and reconsider your approach
 - Keep tasks small and focused for easier tracking
 - Use consistent naming patterns for related tasks
 - Review completed tasks to learn what works
 - Balance breadth vs. depth in your planning
+- Recognize when to transition between levels
 "#;
 
     println!("{}", guide);
