@@ -547,13 +547,17 @@ impl Context {
                 .unwrap_or((None, None))
         };
 
-        // Create the distilled context with all components
-        let distilled = DistilledContext {
+        // Get all levels from the plan
+        let levels = self.plan.levels().to_vec();
+
+        // Create the distilled context with all components using the new constructor
+        let distilled = DistilledContext::new(
             usage_summary,
             task_tree,
-            current_task: current_task_opt,
+            current_task_opt,
             current_level,
-        };
+            levels,
+        );
 
         PlanResponse::new((), distilled)
     }
@@ -618,6 +622,27 @@ pub struct DistilledContext {
     pub current_task: Option<Task>,
     /// The current level information
     pub current_level: Option<Level>,
+    /// All available abstraction levels
+    pub levels: Vec<Level>,
+}
+
+impl DistilledContext {
+    /// Creates a new distilled context with the given components
+    pub fn new(
+        usage_summary: String,
+        task_tree: Vec<TaskTreeNode>,
+        current_task: Option<Task>,
+        current_level: Option<Level>,
+        levels: Vec<Level>,
+    ) -> Self {
+        Self {
+            usage_summary,
+            task_tree,
+            current_task,
+            current_level,
+            levels,
+        }
+    }
 }
 
 /// A node in the task tree for the distilled context

@@ -669,10 +669,41 @@ fn print_distilled_context_response<T>(response: &PlanResponse<T>) {
     }
 
     if let Some(level) = &context.current_level {
-        println!("  Current abstraction level: {}", level.description());
+        println!(
+            "  Current abstraction level: {} - {}",
+            level.name(),
+            level.description()
+        );
         println!("  Focus: {}", level.abstraction_focus());
     }
     println!("");
+
+    // Print available levels
+    println!("AVAILABLE ABSTRACTION LEVELS:");
+    for (idx, level) in context.levels.iter().enumerate() {
+        println!(
+            "  Level {}: {} - {}",
+            idx,
+            level.name(),
+            level.description()
+        );
+        println!("    Focus: {}", level.abstraction_focus());
+
+        // Print a couple of sample questions for each level
+        let questions = level.questions();
+        if !questions.is_empty() {
+            println!("    Sample questions:");
+            for (_q_idx, question) in questions.iter().enumerate().take(2) {
+                println!("      • {}", question);
+            }
+
+            // Indicate if there are more questions
+            if questions.len() > 2 {
+                println!("      • ... and {} more", questions.len() - 2);
+            }
+        }
+        println!("");
+    }
 
     // Print task tree
     println!("TASK TREE:");

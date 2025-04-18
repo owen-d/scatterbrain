@@ -7,6 +7,7 @@ use serde::{Deserialize, Serialize};
 /// Represents an abstraction level for the LLM to work through
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Level {
+    name: String,
     description: String,
     questions: Vec<String>,
     abstraction_focus: String,
@@ -14,8 +15,14 @@ pub struct Level {
 
 impl Level {
     /// Creates a new level
-    pub fn new(description: String, questions: Vec<String>, abstraction_focus: String) -> Self {
+    pub fn new(
+        name: String,
+        description: String,
+        questions: Vec<String>,
+        abstraction_focus: String,
+    ) -> Self {
         Self {
+            name,
             description,
             questions,
             abstraction_focus,
@@ -25,7 +32,8 @@ impl Level {
     /// Returns a string that guides agents on how to effectively use this abstraction level
     pub fn get_guidance(&self) -> String {
         format!(
-            "Abstraction level: {}\n\nFocus instruction: {}\n\nRelevant questions to consider:\n{}",
+            "Abstraction level: {} - {}\n\nFocus instruction: {}\n\nRelevant questions to consider:\n{}",
+            self.name,
             self.description,
             self.abstraction_focus,
             self.questions
@@ -34,6 +42,11 @@ impl Level {
                 .collect::<Vec<_>>()
                 .join("\n")
         )
+    }
+
+    /// Gets the name of this level
+    pub fn name(&self) -> &str {
+        &self.name
     }
 
     /// Gets the description of this level
@@ -55,6 +68,7 @@ impl Level {
 /// Returns the default planning level
 pub fn plan_level() -> Level {
     Level {
+        name: "Planning".to_string(),
         description: "high level planning; identifying architecture, scope, and approach"
             .to_string(),
         questions: vec![
@@ -69,6 +83,7 @@ pub fn plan_level() -> Level {
 /// Returns the default isolation level
 pub fn isolation_level() -> Level {
     Level {
+        name: "Isolation".to_string(),
         description: "Identifying discrete parts of the plan which can be completed independently"
             .to_string(),
         questions: vec![
@@ -82,6 +97,7 @@ pub fn isolation_level() -> Level {
 /// Returns the default ordering level
 pub fn ordering_level() -> Level {
     Level {
+        name: "Ordering".to_string(),
         description: "Ordering the parts of the plan".to_string(),
         questions: vec![
             "Do we move from foundational building blocks to more complex concepts?".to_string(),
@@ -94,6 +110,7 @@ pub fn ordering_level() -> Level {
 /// Returns the default implementation level
 pub fn implementation_level() -> Level {
     Level {
+        name: "Implementation".to_string(),
         description: "Turning each part into an ordered list of tasks".to_string(),
         questions: vec![
             "Can each task be completed independently?".to_string(),
