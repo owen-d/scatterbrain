@@ -26,6 +26,7 @@ use crate::Core;
 #[derive(Serialize, Deserialize)]
 pub struct AddTaskRequest {
     pub description: String,
+    pub level_index: usize,
 }
 
 /// Request to move to a specific task
@@ -138,7 +139,7 @@ async fn add_task(
     State(core): State<Core>,
     Json(payload): Json<AddTaskRequest>,
 ) -> JSONResp<(models::Task, Index)> {
-    let response = core.add_task(payload.description);
+    let response = core.add_task(payload.description, payload.level_index);
     Json(ApiResponse::success(response))
 }
 

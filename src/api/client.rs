@@ -164,9 +164,13 @@ impl Client {
     pub async fn add_task(
         &self,
         description: String,
+        level_index: usize,
     ) -> Result<models::PlanResponse<(models::Task, Index)>, ClientError> {
         let url = format!("{}/api/task", self.config.base_url);
-        let request = AddTaskRequest { description };
+        let request = AddTaskRequest {
+            description,
+            level_index,
+        };
         let response = self.http_client.post(&url).json(&request).send().await?;
 
         if !response.status().is_success() {

@@ -212,17 +212,22 @@ impl Context {
     }
 
     // Task creation and navigation
-    /// Adds a new task with the given description
-    pub fn add_task(&mut self, description: String) -> PlanResponse<(Task, Index)> {
+    /// Adds a new task with the given description and level
+    pub fn add_task(
+        &mut self,
+        description: String,
+        level_index: usize,
+    ) -> PlanResponse<(Task, Index)> {
         self.log_transition(
             "add_task".to_string(),
             Some(format!(
-                "Adding task: '{}' to parent index {:?}",
-                description, self.cursor
+                "Adding task: '{}' with level {} to parent index {:?}",
+                description, level_index, self.cursor
             )),
         );
 
-        let task = Task::new(description);
+        // Use Task::with_level instead of Task::new
+        let task = Task::with_level(description, level_index);
         let new_index;
         let task_clone = task.clone();
 
@@ -796,8 +801,8 @@ impl Core {
         })
     }
 
-    pub fn add_task(&self, description: String) -> PlanResponse<(Task, Index)> {
-        self.with_context(|context| context.add_task(description))
+    pub fn add_task(&self, description: String, level_index: usize) -> PlanResponse<(Task, Index)> {
+        self.with_context(|context| context.add_task(description, level_index))
     }
 
     pub fn complete_task(&self) -> PlanResponse<bool> {
@@ -851,11 +856,11 @@ mod tests {
         let mut context = Context::new(plan);
         assert_eq!(*context.get_current_index().inner(), Vec::<usize>::new());
         // Add a task at the root level
-        let task1_index = context.add_task("Task 1".to_string()).into_inner().1;
+        let task1_index = context.add_task("Task 1".to_string(), 0).into_inner().1;
         assert_eq!(task1_index, vec![0]);
 
         // Add another task at the root level
-        let task2_index = context.add_task("Task 2".to_string()).into_inner().1;
+        let task2_index = context.add_task("Task 2".to_string(), 0).into_inner().1;
         assert_eq!(task2_index, vec![1]);
 
         // Move to the first task
@@ -863,7 +868,7 @@ mod tests {
         assert_eq!(move_response.inner(), &Some("Task 1".to_string()));
 
         // Add a subtask to the first task
-        let subtask1_index = context.add_task("Subtask 1".to_string()).into_inner().1;
+        let subtask1_index = context.add_task("Subtask 1".to_string(), 1).into_inner().1;
         assert_eq!(subtask1_index, vec![0, 0]);
 
         // Move to the second task
@@ -882,11 +887,11 @@ mod tests {
         // Create a plan with default levels
         let plan = Plan::new(default_levels());
         let mut context = Context::new(plan);
-        context.add_task("Root task".to_string());
+        context.add_task("Root task".to_string(), 0);
 
         // Add tasks
-        let task1_index = context.add_task("Task 1".to_string()).into_inner().1;
-        let task2_index = context.add_task("Task 2".to_string()).into_inner().1;
+        let task1_index = context.add_task("Task 1".to_string(), 0).into_inner().1;
+        let task2_index = context.add_task("Task 2".to_string(), 0).into_inner().1;
 
         // Complete a task
         assert!(*context.complete_task(task1_index.clone()).inner());
@@ -905,17 +910,17 @@ mod tests {
         // Create a plan with default levels
         let plan = Plan::new(default_levels());
         let mut context = Context::new(plan);
-        context.add_task("Root task".to_string());
+        context.add_task("Root task".to_string(), 0);
 
         // Add tasks
-        let task1_index = context.add_task("Task 1".to_string()).into_inner().1;
-        let task2_index = context.add_task("Task 2".to_string()).into_inner().1;
+        let task1_index = context.add_task("Task 1".to_string(), 0).into_inner().1;
+        let task2_index = context.add_task("Task 2".to_string(), 0).into_inner().1;
 
         // Move to the first task and add subtasks
         let move_response = context.move_to(task1_index.clone());
         assert!(move_response.inner().is_some());
-        let subtask1_index = context.add_task("Subtask 1".to_string()).into_inner().1;
-        let subtask2_index = context.add_task("Subtask 2".to_string()).into_inner().1;
+        let subtask1_index = context.add_task("Subtask 1".to_string(), 1).into_inner().1;
+        let subtask2_index = context.add_task("Subtask 2".to_string(), 1).into_inner().1;
 
         // Get subtasks of the first task
         let subtasks = context.get_subtasks(task1_index.clone());
@@ -933,18 +938,18 @@ mod tests {
         // Create a plan with default levels
         let plan = Plan::new(default_levels());
         let mut context = Context::new(plan);
-        let root_index = context.add_task("Root task".to_string()).into_inner().1;
+        let root_index = context.add_task("Root task".to_string(), 0).into_inner().1;
         let move_response = context.move_to(root_index.clone());
         assert_eq!(move_response.inner(), &Some("Root task".to_string()));
 
         assert_eq!(*context.get_current_index().inner(), vec![0]);
 
-        let task1_index = context.add_task("Task 1".to_string()).into_inner().1;
+        let task1_index = context.add_task("Task 1".to_string(), 0).into_inner().1;
         let move_response = context.move_to(task1_index.clone());
         assert_eq!(move_response.inner(), &Some("Task 1".to_string()));
         assert_eq!(*context.get_current_index().inner(), vec![0, 0]);
 
-        let task2_index = context.add_task("Task 2".to_string()).into_inner().1;
+        let task2_index = context.add_task("Task 2".to_string(), 0).into_inner().1;
         assert_eq!(*context.get_current_index().inner(), vec![0, 0]);
         let move_response = context.move_to(task2_index.clone());
         assert_eq!(move_response.inner(), &Some("Task 2".to_string()));
@@ -956,18 +961,18 @@ mod tests {
         // Create a plan with default levels
         let plan = Plan::new(default_levels());
         let mut context = Context::new(plan);
-        let root_index = context.add_task("Root task".to_string()).into_inner().1;
+        let root_index = context.add_task("Root task".to_string(), 0).into_inner().1;
         let move_response = context.move_to(root_index.clone());
         assert!(move_response.inner().is_some());
 
         // Add sibling tasks
-        let task1_index = context.add_task("Task 1".to_string()).into_inner().1;
-        let _ = context.add_task("Task 2".to_string());
+        let task1_index = context.add_task("Task 1".to_string(), 0).into_inner().1;
+        let _ = context.add_task("Task 2".to_string(), 0);
 
         // Move to the first task and add a subtask
         let move_response = context.move_to(task1_index.clone());
         assert!(move_response.inner().is_some());
-        let subtask1_index = context.add_task("Subtask 1".to_string()).into_inner().1;
+        let subtask1_index = context.add_task("Subtask 1".to_string(), 1).into_inner().1;
         assert_eq!(subtask1_index, vec![0, 0, 0]);
 
         // Test getting history for the subtask
@@ -996,13 +1001,13 @@ mod tests {
         // Create a plan with default levels
         let plan = Plan::new(default_levels());
         let mut context = Context::new(plan);
-        context.add_task("Root task".to_string());
+        context.add_task("Root task".to_string(), 0);
 
         // Root level (empty cursor) should be 0
         assert_eq!(context.get_current_level(), 0);
 
         // Add a task at root level
-        let task1_index = context.add_task("Task 1".to_string()).into_inner().1;
+        let task1_index = context.add_task("Task 1".to_string(), 0).into_inner().1;
         assert_eq!(context.get_current_level(), 0);
 
         // Move to task1 (level 1)
@@ -1011,7 +1016,7 @@ mod tests {
         assert_eq!(context.get_current_level(), 1);
 
         // Add a subtask to task1
-        let subtask1_index = context.add_task("Subtask 1".to_string()).into_inner().1;
+        let subtask1_index = context.add_task("Subtask 1".to_string(), 1).into_inner().1;
         assert_eq!(context.get_current_level(), 1);
 
         // Move to subtask1 (level 2)
@@ -1049,7 +1054,7 @@ mod tests {
         let mut context = Context::new(plan);
 
         // Add a task at the root level
-        let task_index = context.add_task("Task 1".to_string()).into_inner().1;
+        let task_index = context.add_task("Task 1".to_string(), 0).into_inner().1;
 
         // Change the level
         let result = context.change_level(task_index.clone(), 0);
@@ -1070,7 +1075,7 @@ mod tests {
         assert!(context.history.is_empty());
 
         // Perform some actions
-        let task1_index = context.add_task("Task 1".to_string()).into_inner().1;
+        let task1_index = context.add_task("Task 1".to_string(), 0).into_inner().1;
         let history_len_after_add1 = context.history.len();
         assert_eq!(
             history_len_after_add1, 1,
@@ -1086,7 +1091,7 @@ mod tests {
         );
         assert_eq!(context.history.back().unwrap().action, "move_to");
 
-        context.add_task("Subtask 1".to_string());
+        context.add_task("Subtask 1".to_string(), 1);
         let history_len_after_add2 = context.history.len();
         assert_eq!(
             history_len_after_add2, 3,
@@ -1120,7 +1125,7 @@ mod tests {
 
         // Test buffer limit
         for i in 0..MAX_HISTORY_SIZE + 5 {
-            context.add_task(format!("Filler task {}", i));
+            context.add_task(format!("Filler task {}", i), 0);
         }
         assert_eq!(
             context.history.len(),
@@ -1137,7 +1142,7 @@ mod tests {
         let core = Core::new(context);
 
         // Use add_task through Core
-        let response = core.add_task("Task through Core".to_string());
+        let response = core.add_task("Task through Core".to_string(), 0);
         let task_index = response.into_inner().1;
 
         // Move to the task

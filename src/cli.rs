@@ -125,24 +125,17 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
             let client = create_client(&cli.server);
             let result = match command {
                 TaskCommands::Add { description, level } => {
-                    // Add the task
-                    let response = client.add_task(description.clone()).await?;
+                    // Add the task, passing the level
+                    let response = client.add_task(description.clone(), *level).await?;
 
                     // Get the task and index from the response
                     let (_task, index) = response.inner();
 
-                    // Change the level
-                    let level_result = client.change_level(index.clone(), *level).await;
-
-                    if let Err(e) = level_result {
-                        println!("Warning: Could not set level: {}", e);
-                        println!("Added task: \"{}\" at index: {:?}", description, index);
-                    } else {
-                        println!(
-                            "Added task: \"{}\" with level {} at index: {:?}",
-                            description, level, index
-                        );
-                    }
+                    // No longer need to manually change the level here, it's set during add
+                    println!(
+                        "Added task: \"{}\" with level {} at index: {:?}",
+                        description, level, index
+                    );
 
                     Ok(())
                 }
@@ -557,26 +550,26 @@ COMMON MISTAKES TO AVOID:
 /// Creates an example task tree for UI testing
 fn create_example_tasks(context: &mut Context) {
     // Create top-level tasks (level 0 - Business Strategy)
-    let result = context.add_task("Build Web Application".to_string());
+    let result = context.add_task("Build Web Application".to_string(), 0);
     let (_, idx) = result.into_inner();
     context.move_to(idx).inner();
 
     // Level 1 - Project Planning
     // Add subtasks to "Build Web Application"
-    let result = context.add_task("Implement Frontend".to_string());
+    let result = context.add_task("Implement Frontend".to_string(), 1);
     let (_, idx) = result.into_inner();
     context.move_to(idx).inner();
 
     // Level 2 - Implementation
     // Add subtasks to "Implement Frontend"
-    let result = context.add_task("Design UI Components".to_string());
+    let result = context.add_task("Design UI Components".to_string(), 2);
     let (_, idx) = result.into_inner();
     context.move_to(idx).inner();
 
     // Level 3 - Implementation Details
     // Add subtasks to "Design UI Components"
     context
-        .add_task("Implement User Authentication UI".to_string())
+        .add_task("Implement User Authentication UI".to_string(), 3)
         .into_inner();
 
     // Move back up to "Implement Frontend"
@@ -587,47 +580,47 @@ fn create_example_tasks(context: &mut Context) {
 
     // Add another subtask to "Implement Frontend"
     context
-        .add_task("Set up State Management".to_string())
+        .add_task("Set up State Management".to_string(), 2)
         .into_inner();
 
     // Move back to root
     context.move_to(vec![0]).inner();
 
     // Add "Implement Backend" as subtask of "Build Web Application"
-    let result = context.add_task("Implement Backend".to_string());
+    let result = context.add_task("Implement Backend".to_string(), 1);
     let (_, idx) = result.into_inner();
     context.move_to(idx).inner();
 
     // Add backend tasks
-    let result = context.add_task("Set up Database".to_string());
+    let result = context.add_task("Set up Database".to_string(), 2);
     let (_, idx) = result.into_inner();
     context.move_to(idx).inner();
 
     // Add some API endpoint tasks
     context
-        .add_task("Create API Endpoints".to_string())
+        .add_task("Create API Endpoints".to_string(), 3)
         .into_inner();
     context
-        .add_task("Implement Authentication Logic".to_string())
+        .add_task("Implement Authentication Logic".to_string(), 3)
         .into_inner();
     context
-        .add_task("Create Data Models".to_string())
+        .add_task("Create Data Models".to_string(), 3)
         .into_inner();
 
     // Move back to "Set up Database"
     context.move_to(vec![0, 1, 0]).inner();
 
     // Add database schema tasks
-    let result = context.add_task("Product Model".to_string());
+    let result = context.add_task("Product Model".to_string(), 3);
     let (_, idx) = result.into_inner();
     context.move_to(idx).inner();
 
     // Add some fields
     context
-        .add_task("Define Product Fields".to_string())
+        .add_task("Define Product Fields".to_string(), 3)
         .into_inner();
     context
-        .add_task("Implement Relationships".to_string())
+        .add_task("Implement Relationships".to_string(), 3)
         .into_inner();
 
     // Move back to root level
@@ -635,14 +628,14 @@ fn create_example_tasks(context: &mut Context) {
 
     // Add a few more top level tasks
     context
-        .add_task("Write Documentation".to_string())
+        .add_task("Write Documentation".to_string(), 0)
         .into_inner();
     context
-        .add_task("Test Application".to_string())
+        .add_task("Test Application".to_string(), 0)
         .into_inner();
 
     // Reset to root
-    context.move_to(vec![0, 0, 0]).inner();
+    context.move_to(vec![]).inner();
 }
 
 /// Print a distilled context from any PlanResponse
