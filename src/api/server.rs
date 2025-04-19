@@ -471,12 +471,6 @@ fn render_tasks_html(
             task.description()
         ));
 
-        // Task status
-        html.push_str(&format!(
-            "<span class='task-status'>{}</span>",
-            if task.is_completed() { "✓" } else { "○" }
-        ));
-
         // Add completion summary if available
         if task.is_completed() {
             if let Some(summary) = task.completion_summary() {
@@ -486,6 +480,12 @@ fn render_tasks_html(
                 ));
             }
         }
+
+        // Task status
+        html.push_str(&format!(
+            "<span class='task-status'>{}</span>",
+            if task.is_completed() { "✓" } else { "○" }
+        ));
 
         html.push_str("</div>"); // Close task-item div
 
@@ -608,12 +608,9 @@ const HTML_TEMPLATE_HEADER: &str = r#"<!DOCTYPE html>
             padding-left: 10px;
             margin-left: -14px;
         }
-        .completed {
-            color: #7f8c8d;
-            text-decoration: line-through;
-        }
         .completed .task-status {
             color: #27ae60;
+            text-decoration: none !important; /* Ensure status icon is never struck through */
         }
         .task-summary {
             font-size: 0.9em;
@@ -633,10 +630,6 @@ const HTML_TEMPLATE_HEADER: &str = r#"<!DOCTYPE html>
         }
         .subtasks li {
             margin-bottom: 5px;
-        }
-        .subtasks li.completed {
-            color: #7f8c8d;
-            text-decoration: line-through;
         }
         .controls {
             margin-top: 30px;
@@ -720,6 +713,16 @@ const HTML_TEMPLATE_HEADER: &str = r#"<!DOCTYPE html>
         .history-details {
             color: #555;
             flex-grow: 1;
+        }
+        /* Style completed task description */
+        .completed .task-desc {
+            color: #7f8c8d;
+            text-decoration: line-through;
+        }
+        /* Style completed subtask description */
+        .subtasks li.completed .task-desc {
+            color: #7f8c8d;
+            text-decoration: line-through;
         }
     </style>
 </head>

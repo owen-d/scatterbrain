@@ -687,7 +687,7 @@ impl Context {
     /// Creates a distilled context with focused information about the current planning state
     pub fn distilled_context(&self) -> PlanResponse<()> {
         // Create the usage summary
-        let usage_summary = "Scatterbrain is a hierarchical planning tool that helps break down complex tasks into manageable pieces. Use 'task add' to add tasks, 'move <index>' to navigate, and 'task complete' to mark tasks as done. Tasks are organized in levels from high-level planning to specific implementation details.".to_string();
+        let usage_summary = "Scatterbrain is a hierarchical planning tool that helps break down complex tasks into manageable pieces. Use 'task add' to add tasks, 'move <index>' to navigate, and 'task complete' to mark tasks as done. Use '--help' on any command (e.g., `scatterbrain task --help`) for more details. Tasks are organized in levels from high-level planning to specific implementation details.".to_string();
 
         // Build the task tree from root to current, with one level of children
         let task_tree = self.build_task_tree();
