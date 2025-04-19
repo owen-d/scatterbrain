@@ -965,14 +965,12 @@ impl Core {
 
     pub fn complete_task(
         &self,
+        index: Index,
         lease_attempt: Option<u8>,
         force: bool,
         summary: Option<String>,
     ) -> PlanResponse<bool> {
         self.with_context(|context| {
-            // Get the current index first
-            let index = context.get_current_index().into_inner();
-
             // Map the Option<u8> to Option<Lease>
             let lease_attempt_typed = lease_attempt.map(Lease);
 
@@ -1353,7 +1351,12 @@ mod tests {
 
         // Complete the task (provide summary or force)
         assert!(*core
-            .complete_task(None, false, Some("Test summary".to_string()))
+            .complete_task(
+                task_index.clone(),
+                None,
+                false,
+                Some("Test summary".to_string())
+            )
             .inner()); // Provide summary
 
         // Verify task is completed via Current
@@ -1406,7 +1409,7 @@ mod tests {
         // --- Test Completion --- //
 
         // 1. Fail completion without lease
-        let complete_fail_no_lease = core.complete_task(None, false, None);
+        let complete_fail_no_lease = core.complete_task(task_index.clone(), None, false, None);
         assert!(
             !complete_fail_no_lease.inner(),
             "Completion should fail without lease"
@@ -1414,7 +1417,8 @@ mod tests {
 
         // 2. Fail completion with wrong lease
         let wrong_lease = generated_lease.wrapping_add(1); // Ensure different lease
-        let complete_fail_wrong_lease = core.complete_task(Some(wrong_lease), false, None);
+        let complete_fail_wrong_lease =
+            core.complete_task(task_index.clone(), Some(wrong_lease), false, None);
         assert!(
             !complete_fail_wrong_lease.inner(),
             "Completion should fail with wrong lease"
@@ -1422,8 +1426,12 @@ mod tests {
 
         // 3. Succeed completion with correct lease and summary
         let summary1 = "Lease success".to_string();
-        let complete_success =
-            core.complete_task(Some(generated_lease), false, Some(summary1.clone()));
+        let complete_success = core.complete_task(
+            task_index.clone(),
+            Some(generated_lease),
+            false,
+            Some(summary1.clone()),
+        );
         assert!(
             complete_success.inner(),
             "Completion should succeed with correct lease"
@@ -1458,7 +1466,8 @@ mod tests {
 
         // 4. Succeed completion with --force, even without lease (provide optional summary)
         let summary2 = "Forced completion summary".to_string();
-        let complete_force_no_lease = core.complete_task(None, true, Some(summary2.clone()));
+        let complete_force_no_lease =
+            core.complete_task(task2_index.clone(), None, true, Some(summary2.clone())); // Clone here as well
         assert!(
             complete_force_no_lease.inner(),
             "Completion should succeed with force, no lease"

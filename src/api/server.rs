@@ -46,6 +46,7 @@ pub struct ChangeLevelRequest {
 /// Request to complete a task, possibly with lease
 #[derive(Serialize, Deserialize)]
 pub struct CompleteTaskRequest {
+    pub index: Index,
     pub lease: Option<u8>,
     pub force: bool,
     pub summary: Option<String>,
@@ -164,7 +165,7 @@ async fn complete_task(
     State(core): State<Core>,
     Json(payload): Json<CompleteTaskRequest>,
 ) -> JSONResp<bool> {
-    let response = core.complete_task(payload.lease, payload.force, payload.summary);
+    let response = core.complete_task(payload.index, payload.lease, payload.force, payload.summary);
     if *response.inner() {
         Json(ApiResponse::success(response))
     } else {

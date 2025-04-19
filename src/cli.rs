@@ -82,8 +82,12 @@ enum TaskCommands {
         level: usize,
     },
 
-    /// Complete the current task
+    /// Complete the current task or the task at the specified index
     Complete {
+        /// Optional task index (e.g., 0 or 0,1,2 for nested tasks). If omitted, completes the current task.
+        #[arg(short, long)]
+        index: Option<String>,
+
         /// The lease required to complete the task
         #[arg(long)]
         lease: Option<u8>,
@@ -168,18 +172,35 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
                 }
 
                 TaskCommands::Complete {
+                    index: index_str_opt,
                     lease,
                     force,
                     summary,
                 } => {
-                    // Pass lease, force, and summary to the client call
+                    // Determine the target index
+                    let target_index = if let Some(index_str) = index_str_opt {
+                        // Parse the provided index string
+                        match parse_index(index_str) {
+                            Ok(idx) => idx,
+                            Err(e) => {
+                                eprintln!("Error parsing index: {}", e);
+                                return Err(e.into());
+                            }
+                        }
+                    } else {
+                        // If no index is provided, use the current index
+                        vec![] // Pass an empty index to indicate current task
+                    };
+
+                    // Pass the target index, lease, force, and summary to the client call
                     let response = client
-                        .complete_task(*lease, *force, summary.clone())
+                        .complete_task(target_index, *lease, *force, summary.clone())
                         .await?;
 
                     print_response(&response, |success| {
                         if *success {
-                            println!("Completed the current task");
+                            // TODO: Include the index in the completion message
+                            println!("Completed task");
                         } else {
                             println!(
                                 "Failed to complete task (lease mismatch? use --force to override)"
@@ -591,6 +612,7 @@ MOVING UP:
 TASK MANAGEMENT:
   $ scatterbrain task add --level <LEVEL> "Task description"    Create new task (level is required)
   $ scatterbrain task complete [--lease <ID>] [--force] [--summary <TEXT>] Complete current task (summary required unless --force)
+  $ scatterbrain task complete --index <INDEX> [--lease <ID>] [--force] [--summary <TEXT>] Complete task at specified index
   $ scatterbrain task change-level <LEVEL_INDEX>               Change current task's abstraction level
   $ scatterbrain task lease <INDEX>                            Generate a lease for a task
   $ scatterbrain task remove <INDEX>                           Remove a task by its index (e.g., 0,1,2)

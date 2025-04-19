@@ -203,56 +203,40 @@ impl Client {
     /// Complete the current task
     pub async fn complete_task(
         &self,
+        index: Index,
         lease: Option<u8>,
         force: bool,
         summary: Option<String>,
     ) -> Result<models::PlanResponse<bool>, ClientError> {
         let url = format!("{}/api/task/complete", self.config.base_url);
-
-        // Use the imported CompleteTaskRequest struct
         let request = CompleteTaskRequest {
+            index,
             lease,
             force,
             summary,
         };
-
         let response = self.http_client.post(&url).json(&request).send().await?;
-        let status = response.status(); // Read status before potentially consuming body
 
-        if status.is_success() {
-            let api_response: ApiResponse<models::PlanResponse<bool>> = match response.json().await
-            {
-                Ok(data) => data,
-                Err(e) => {
-                    return Err(ClientError::Api(format!(
-                        "Failed to parse success response: {}",
-                        e
-                    )))
-                }
-            };
-            if api_response.success {
-                api_response.data.ok_or(ClientError::MissingData)
-            } else {
-                // The API returns success=false if completion fails (e.g., lease mismatch)
-                // Extract the PlanResponse<bool> which should contain 'false'
-                api_response.data.ok_or_else(|| {
-                    ClientError::Api(
-                        api_response
-                            .error
-                            .unwrap_or_else(|| "Unknown API error on failure".to_string()),
-                    )
-                })
+        if !response.status().is_success() {
+            return Err(ClientError::Api(format!(
+                "HTTP error: {}",
+                response.status()
+            )));
+        }
+
+        let api_response: ApiResponse<models::PlanResponse<bool>> = response.json().await?;
+
+        if api_response.success {
+            match api_response.data {
+                Some(plan_response) => Ok(plan_response),
+                None => Err(ClientError::MissingData),
             }
         } else {
-            // Handle non-200 HTTP errors
-            let err_text = response
-                .text()
-                .await
-                .unwrap_or_else(|_| "Failed to read error body".to_string());
-            Err(ClientError::Api(format!(
-                "HTTP error: {}. Body: {}",
-                status, err_text
-            )))
+            Err(ClientError::Api(
+                api_response
+                    .error
+                    .unwrap_or_else(|| "Unknown API error".to_string()),
+            ))
         }
     }
 
