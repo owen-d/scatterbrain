@@ -88,6 +88,10 @@ enum TaskCommands {
         /// Force completion even if lease doesn't match
         #[arg(long, default_value_t = false)]
         force: bool,
+
+        /// Optional summary for completing the task
+        #[arg(long)]
+        summary: Option<String>,
     },
 
     /// Change the abstraction level of the current task
@@ -154,9 +158,15 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
                     Ok(())
                 }
 
-                TaskCommands::Complete { lease, force } => {
-                    // Pass lease and force to the client call
-                    let response = client.complete_task(*lease, *force).await?;
+                TaskCommands::Complete {
+                    lease,
+                    force,
+                    summary,
+                } => {
+                    // Pass lease, force, and summary to the client call
+                    let response = client
+                        .complete_task(*lease, *force, summary.clone())
+                        .await?;
 
                     print_response(&response, |success| {
                         if *success {
@@ -513,8 +523,20 @@ MOVING UP:
      $ scatterbrain distilled
      
    - Complete tasks when finished:
-     $ scatterbrain task complete --lease <LEASE_ID>  # Optionally provide lease
-     $ scatterbrain task complete --force           # Or force completion
+     $ scatterbrain task complete --summary "Implemented the feature"
+     
+   - Complete tasks requiring a lease:
+     Some tasks require a 'lease' token for completion, ensuring only one agent
+     attempts completion at a time.
+     1. Generate the lease for the task:
+        $ scatterbrain task lease <INDEX>  # e.g., scatterbrain task lease 0,1,2
+        > Generated lease 123 for task at index: 0,1,2
+     2. Complete the task using the generated lease ID and provide a summary:
+        $ scatterbrain task complete --lease 123 --summary "Completed task with lease"
+     
+     Note: If the lease doesn't match, completion will fail unless you use --force.
+     Using --force bypasses both lease and summary checks; use it sparingly.
+     $ scatterbrain task complete --force
      
    - Move between tasks to adapt to changing priorities:
      $ scatterbrain move 1,2
@@ -529,7 +551,7 @@ MOVING UP:
 
 TASK MANAGEMENT:
   $ scatterbrain task add --level <LEVEL> "Task description"    Create new task (level is required)
-  $ scatterbrain task complete [--lease <ID>] [--force]         Complete current task (lease/force optional)
+  $ scatterbrain task complete [--lease <ID>] [--force] [--summary <TEXT>] Complete current task (summary required unless --force)
   $ scatterbrain task change-level <LEVEL_INDEX>               Change current task's abstraction level
   $ scatterbrain task lease <INDEX>                            Generate a lease for a task
   
@@ -557,7 +579,7 @@ HELP & UTILITIES:
 PRODUCTIVITY TECHNIQUES:
   • Focus on one task at a time
   • Use 'current' and 'distilled' to maintain context
-  • Complete tasks before moving to another
+  • Complete tasks before moving to another (providing a summary!)
   • Revisit higher levels when assumptions change
 
 LEVEL USAGE:
@@ -572,13 +594,14 @@ COMMON MISTAKES TO AVOID:
   • Abstraction resistance: Staying too high-level when details are needed
   • Abstraction abandonment: Getting lost in details and forgetting the big picture
   • Level skipping: Jumping from Level 0 to Level 3 without proper planning
+  • Forcing completion: Overusing --force bypasses safety checks and summary requirements.
 
 == TIPS ==
 
 - When stuck, move up a level and reconsider your approach
 - Keep tasks small and focused for easier tracking
 - Use consistent naming patterns for related tasks
-- Review completed tasks to learn what works
+- Review completed tasks and their summaries to learn what works
 - Balance breadth vs. depth in your planning
 - Recognize when to transition between levels
 "#;
@@ -590,55 +613,60 @@ COMMON MISTAKES TO AVOID:
 fn create_example_tasks(context: &mut Context) {
     // Create top-level tasks (level 0 - Business Strategy)
     let result = context.add_task("Build Web Application".to_string(), 0);
-    let (_, idx) = result.into_inner();
-    context.move_to(idx).inner();
+    let (_, idx_root) = result.into_inner(); // Keep root index
+    context.move_to(idx_root.clone()).inner();
 
     // Level 1 - Project Planning
-    // Add subtasks to "Build Web Application"
     let result = context.add_task("Implement Frontend".to_string(), 1);
-    let (_, idx) = result.into_inner();
-    context.move_to(idx).inner();
+    let (_, idx_frontend) = result.into_inner();
+    context.move_to(idx_frontend.clone()).inner();
 
     // Level 2 - Implementation
-    // Add subtasks to "Implement Frontend"
     let result = context.add_task("Design UI Components".to_string(), 2);
-    let (_, idx) = result.into_inner();
-    context.move_to(idx).inner();
+    let (_, idx_ui_components) = result.into_inner();
+    context.move_to(idx_ui_components.clone()).inner();
 
     // Level 3 - Implementation Details
-    // Add subtasks to "Design UI Components"
+    let result = context.add_task("Implement User Authentication UI".to_string(), 3);
+    let (_, idx_auth_ui) = result.into_inner();
+    // -- Complete this task --
     context
-        .add_task("Implement User Authentication UI".to_string(), 3)
-        .into_inner();
+        .complete_task(idx_auth_ui, None, true, Some("Auth UI done.".to_string()))
+        .inner();
 
     // Move back up to "Implement Frontend"
-    context.move_to(vec![0, 0, 0]).inner();
-
-    // Back to parent
-    context.move_to(vec![0, 0]).inner();
+    context.move_to(idx_frontend.clone()).inner();
 
     // Add another subtask to "Implement Frontend"
-    context
-        .add_task("Set up State Management".to_string(), 2)
-        .into_inner();
+    let result = context.add_task("Set up State Management".to_string(), 2);
+    let (_, idx_state_mgmt) = result.into_inner(); // Keep this index for final cursor
 
     // Move back to root
-    context.move_to(vec![0]).inner();
+    context.move_to(idx_root.clone()).inner();
 
     // Add "Implement Backend" as subtask of "Build Web Application"
     let result = context.add_task("Implement Backend".to_string(), 1);
-    let (_, idx) = result.into_inner();
-    context.move_to(idx).inner();
+    let (_, idx_backend) = result.into_inner();
+    context.move_to(idx_backend.clone()).inner();
 
     // Add backend tasks
     let result = context.add_task("Set up Database".to_string(), 2);
-    let (_, idx) = result.into_inner();
-    context.move_to(idx).inner();
+    let (_, idx_db) = result.into_inner();
+    context.move_to(idx_db.clone()).inner();
 
     // Add some API endpoint tasks
+    let result = context.add_task("Create API Endpoints".to_string(), 3);
+    let (_, idx_api) = result.into_inner();
+    // -- Complete this task --
     context
-        .add_task("Create API Endpoints".to_string(), 3)
-        .into_inner();
+        .complete_task(
+            idx_api,
+            None,
+            true,
+            Some("Basic CRUD endpoints added.".to_string()),
+        )
+        .inner();
+
     context
         .add_task("Implement Authentication Logic".to_string(), 3)
         .into_inner();
@@ -647,12 +675,12 @@ fn create_example_tasks(context: &mut Context) {
         .into_inner();
 
     // Move back to "Set up Database"
-    context.move_to(vec![0, 1, 0]).inner();
+    context.move_to(idx_db.clone()).inner();
 
     // Add database schema tasks
     let result = context.add_task("Product Model".to_string(), 3);
-    let (_, idx) = result.into_inner();
-    context.move_to(idx).inner();
+    let (_, idx_prod_model) = result.into_inner();
+    context.move_to(idx_prod_model.clone()).inner();
 
     // Add some fields
     context
@@ -663,7 +691,7 @@ fn create_example_tasks(context: &mut Context) {
         .into_inner();
 
     // Move back to root level
-    context.move_to(vec![0]).inner();
+    context.move_to(idx_root.clone()).inner();
 
     // Add a few more top level tasks
     context
@@ -673,8 +701,8 @@ fn create_example_tasks(context: &mut Context) {
         .add_task("Test Application".to_string(), 0)
         .into_inner();
 
-    // Reset to root
-    context.move_to(vec![]).inner();
+    // Set final cursor position to the incomplete "Set up State Management" task
+    context.move_to(idx_state_mgmt).inner();
 }
 
 /// Print a distilled context from any PlanResponse

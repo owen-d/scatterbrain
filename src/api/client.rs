@@ -205,11 +205,16 @@ impl Client {
         &self,
         lease: Option<u8>,
         force: bool,
+        summary: Option<String>,
     ) -> Result<models::PlanResponse<bool>, ClientError> {
         let url = format!("{}/api/task/complete", self.config.base_url);
 
         // Use the imported CompleteTaskRequest struct
-        let request = CompleteTaskRequest { lease, force };
+        let request = CompleteTaskRequest {
+            lease,
+            force,
+            summary,
+        };
 
         let response = self.http_client.post(&url).json(&request).send().await?;
         let status = response.status(); // Read status before potentially consuming body

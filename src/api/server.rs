@@ -47,6 +47,7 @@ pub struct ChangeLevelRequest {
 pub struct CompleteTaskRequest {
     pub lease: Option<u8>,
     pub force: bool,
+    pub summary: Option<String>,
 }
 
 /// Request to generate a lease for a task
@@ -161,7 +162,7 @@ async fn complete_task(
     State(core): State<Core>,
     Json(payload): Json<CompleteTaskRequest>,
 ) -> JSONResp<bool> {
-    let response = core.complete_task(payload.lease, payload.force);
+    let response = core.complete_task(payload.lease, payload.force, payload.summary);
     if *response.inner() {
         Json(ApiResponse::success(response))
     } else {
@@ -472,9 +473,21 @@ fn render_tasks_html(
 
         // Task status
         html.push_str(&format!(
-            "<span class='task-status'>{}</span></div>",
+            "<span class='task-status'>{}</span>",
             if task.is_completed() { "✓" } else { "○" }
         ));
+
+        // Add completion summary if available
+        if task.is_completed() {
+            if let Some(summary) = task.completion_summary() {
+                html.push_str(&format!(
+                    "<span class='task-summary'>Summary: {}</span>",
+                    summary
+                ));
+            }
+        }
+
+        html.push_str("</div>"); // Close task-item div
 
         // Render subtasks recursively
         if !task.subtasks().is_empty() {
@@ -601,6 +614,12 @@ const HTML_TEMPLATE_HEADER: &str = r#"<!DOCTYPE html>
         }
         .completed .task-status {
             color: #27ae60;
+        }
+        .task-summary {
+            font-size: 0.9em;
+            color: #555;
+            margin-left: 15px; /* Indent summary slightly */
+            font-style: italic;
         }
         .current-task {
             background-color: #f8f9fa;

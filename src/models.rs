@@ -21,6 +21,7 @@ pub struct Task {
     completed: bool,
     subtasks: Vec<Task>,
     level_index: Option<usize>,
+    completion_summary: Option<String>,
 }
 
 impl Task {
@@ -31,6 +32,7 @@ impl Task {
             completed: false,
             subtasks: Vec::new(),
             level_index: None,
+            completion_summary: None,
         }
     }
 
@@ -41,6 +43,7 @@ impl Task {
             completed: false,
             subtasks: Vec::new(),
             level_index: Some(level_index),
+            completion_summary: None,
         }
     }
 
@@ -82,6 +85,11 @@ impl Task {
     /// Gets the level index if it's explicitly set
     pub fn level_index(&self) -> Option<usize> {
         self.level_index
+    }
+
+    /// Gets the completion summary if it exists
+    pub fn completion_summary(&self) -> Option<&String> {
+        self.completion_summary.as_ref()
     }
 }
 
@@ -322,6 +330,7 @@ impl Context {
         index: Index,
         lease_attempt: Option<Lease>,
         force: bool,
+        summary: Option<String>,
     ) -> PlanResponse<Result<bool, String>> {
         // Lease check
         if !force {
@@ -346,6 +355,16 @@ impl Context {
             // If no lease exists for the index, completion is allowed without a lease (unless forced)
         }
 
+        // Check for summary if force is false
+        if !force && summary.is_none() {
+            let msg = format!(
+                "Task at index {:?} requires a summary for non-forced completion.",
+                index
+            );
+            self.log_transition("complete_task_failed".to_string(), Some(msg.clone()));
+            return PlanResponse::new(Err(msg), self.distilled_context().context());
+        }
+
         self.log_transition(
             "complete_task".to_string(),
             Some(format!(
@@ -360,7 +379,8 @@ impl Context {
         // Complete the task
         let success = if let Some(task) = self.get_task_mut(index.clone()) {
             task.complete();
-            // Remove the lease once completed
+            task.completion_summary = summary; // Store the summary
+                                               // Remove the lease once completed
             self.leases.remove(&index);
             true
         } else {
@@ -603,6 +623,7 @@ impl Context {
                                 index: child_idx.clone(),
                                 completed: child_task.is_completed(),
                                 is_current: child_idx == self.cursor,
+                                completion_summary: child_task.completion_summary().cloned(),
                                 children: if is_on_deeper_path {
                                     self.build_subtree(&child_idx)
                                 } else {
@@ -620,6 +641,7 @@ impl Context {
                     index: idx.clone(),
                     completed: task.is_completed(),
                     is_current: idx == self.cursor,
+                    completion_summary: task.completion_summary().cloned(),
                     children,
                 }
             })
@@ -651,6 +673,7 @@ impl Context {
                     index: idx.clone(),
                     completed: task.is_completed(),
                     is_current: idx == self.cursor,
+                    completion_summary: task.completion_summary().cloned(),
                     children: if is_on_path {
                         self.build_subtree(&idx)
                     } else {
@@ -800,6 +823,8 @@ pub struct TaskTreeNode {
     pub completed: bool,
     /// Whether this is the current task
     pub is_current: bool,
+    /// Optional completion summary
+    pub completion_summary: Option<String>,
     /// Child tasks (only included for the current task and its ancestors)
     pub children: Vec<TaskTreeNode>,
 }
@@ -874,7 +899,12 @@ impl Core {
         self.with_context(|context| context.add_task(description, level_index))
     }
 
-    pub fn complete_task(&self, lease_attempt: Option<u8>, force: bool) -> PlanResponse<bool> {
+    pub fn complete_task(
+        &self,
+        lease_attempt: Option<u8>,
+        force: bool,
+        summary: Option<String>,
+    ) -> PlanResponse<bool> {
         self.with_context(|context| {
             // Get the current index first
             let index = context.get_current_index().into_inner();
@@ -883,7 +913,7 @@ impl Core {
             let lease_attempt_typed = lease_attempt.map(Lease);
 
             // Call the context method which returns PlanResponse<Result<bool, String>>
-            let result_response = context.complete_task(index, lease_attempt_typed, force);
+            let result_response = context.complete_task(index, lease_attempt_typed, force, summary);
 
             // Extract the inner Result<bool, String>
             let inner_result = result_response.into_inner();
@@ -984,9 +1014,14 @@ mod tests {
         let task1_index = context.add_task("Task 1".to_string(), 0).into_inner().1;
         let task2_index = context.add_task("Task 2".to_string(), 0).into_inner().1;
 
-        // Complete a task (no lease required yet)
+        // Complete a task (provide summary or force)
         assert!(context
-            .complete_task(task1_index.clone(), None, false)
+            .complete_task(
+                task1_index.clone(),
+                None,
+                false,
+                Some("Test summary".to_string())
+            ) // Provide summary
             .inner()
             .as_ref()
             .unwrap());
@@ -1194,13 +1229,13 @@ mod tests {
         );
         assert_eq!(context.history.back().unwrap().action, "add_task");
 
-        context.complete_task(subtask_index, None, false); // Complete Subtask 1
+        context.complete_task(subtask_index, None, false, Some("Test summary".to_string())); // Provide summary
         let history_len_after_complete = context.history.len();
         assert_eq!(
             history_len_after_complete, 4,
             "History should have 4 entries after complete"
         );
-        assert_eq!(context.history.back().unwrap().action, "complete_task");
+        assert_eq!(context.history.back().unwrap().action, "complete_task"); // Expect success
 
         context.change_level(task1_index, 0);
         let history_len_after_change_level = context.history.len();
@@ -1247,8 +1282,10 @@ mod tests {
             &Some("Task through Core".to_string())
         );
 
-        // Complete the task (no lease)
-        assert!(*core.complete_task(None, false).inner());
+        // Complete the task (provide summary or force)
+        assert!(*core
+            .complete_task(None, false, Some("Test summary".to_string()))
+            .inner()); // Provide summary
 
         // Verify task is completed via Current
         let current_response = core.current();
@@ -1300,7 +1337,7 @@ mod tests {
         // --- Test Completion --- //
 
         // 1. Fail completion without lease
-        let complete_fail_no_lease = core.complete_task(None, false);
+        let complete_fail_no_lease = core.complete_task(None, false, None);
         assert!(
             !complete_fail_no_lease.inner(),
             "Completion should fail without lease"
@@ -1308,20 +1345,22 @@ mod tests {
 
         // 2. Fail completion with wrong lease
         let wrong_lease = generated_lease.wrapping_add(1); // Ensure different lease
-        let complete_fail_wrong_lease = core.complete_task(Some(wrong_lease), false);
+        let complete_fail_wrong_lease = core.complete_task(Some(wrong_lease), false, None);
         assert!(
             !complete_fail_wrong_lease.inner(),
             "Completion should fail with wrong lease"
         );
 
-        // 3. Succeed completion with correct lease
-        let complete_success = core.complete_task(Some(generated_lease), false);
+        // 3. Succeed completion with correct lease and summary
+        let summary1 = "Lease success".to_string();
+        let complete_success =
+            core.complete_task(Some(generated_lease), false, Some(summary1.clone()));
         assert!(
             complete_success.inner(),
             "Completion should succeed with correct lease"
         );
 
-        // Verify task is completed
+        // Verify task is completed and summary stored
         let task = core
             .get_plan()
             .into_inner()
@@ -1332,6 +1371,7 @@ mod tests {
             task.is_completed(),
             "Task should be completed after successful lease completion"
         );
+        assert_eq!(task.completion_summary(), Some(&summary1));
 
         // --- Test Force Completion --- //
 
@@ -1347,8 +1387,9 @@ mod tests {
         let lease2_response = core.generate_lease(task2_index.clone());
         let _generated_lease2 = lease2_response.inner().value(); // Use .value()
 
-        // 4. Succeed completion with --force, even without lease
-        let complete_force_no_lease = core.complete_task(None, true);
+        // 4. Succeed completion with --force, even without lease (provide optional summary)
+        let summary2 = "Forced completion summary".to_string();
+        let complete_force_no_lease = core.complete_task(None, true, Some(summary2.clone()));
         assert!(
             complete_force_no_lease.inner(),
             "Completion should succeed with force, no lease"
@@ -1360,6 +1401,7 @@ mod tests {
             .unwrap()
             .1;
         assert!(task2.is_completed(), "Task 2 should be completed via force");
+        assert_eq!(task2.completion_summary(), Some(&summary2)); // Verify summary stored even with force
 
         // --- Test Lease Removal --- //
         // Check if lease was removed after completion (test this indirectly via Context)
@@ -1372,5 +1414,83 @@ mod tests {
             !context_lock.leases.contains_key(&task2_index),
             "Lease should be removed after forced completion"
         );
+    }
+
+    #[test]
+    fn test_task_completion_with_summary() {
+        let plan = Plan::new(default_levels());
+        let mut context = Context::new(plan);
+
+        // Add a task
+        let task_index = context
+            .add_task("Task with Summary".to_string(), 0)
+            .into_inner()
+            .1;
+        context.move_to(task_index.clone()); // Move cursor to the task
+
+        // 1. Fail completion without force and without summary
+        let result_no_summary = context.complete_task(task_index.clone(), None, false, None);
+        assert!(result_no_summary.inner().is_err());
+        assert!(result_no_summary
+            .inner()
+            .as_ref()
+            .err()
+            .unwrap()
+            .contains("requires a summary"));
+
+        // Verify task is still not completed and has no summary
+        let task = context.get_task(task_index.clone()).unwrap();
+        assert!(!task.is_completed());
+        assert!(task.completion_summary().is_none());
+
+        // 2. Succeed completion without force, *with* summary
+        let summary_text = "Task completed successfully".to_string();
+        let result_with_summary =
+            context.complete_task(task_index.clone(), None, false, Some(summary_text.clone()));
+        assert!(result_with_summary.inner().is_ok());
+        assert!(*result_with_summary.inner().as_ref().unwrap());
+
+        // Verify task is completed and summary is stored
+        let task = context.get_task(task_index.clone()).unwrap();
+        assert!(task.is_completed());
+        assert_eq!(task.completion_summary(), Some(&summary_text));
+
+        // Add another task for force testing
+        let force_task_index = context.add_task("Force Task".to_string(), 0).into_inner().1;
+        context.move_to(force_task_index.clone());
+
+        // 3. Succeed completion *with* force, without summary
+        let result_force_no_summary =
+            context.complete_task(force_task_index.clone(), None, true, None);
+        assert!(result_force_no_summary.inner().is_ok());
+        assert!(*result_force_no_summary.inner().as_ref().unwrap());
+
+        // Verify task is completed and summary is None
+        let task = context.get_task(force_task_index.clone()).unwrap();
+        assert!(task.is_completed());
+        assert!(task.completion_summary().is_none());
+
+        // Add a third task for force + summary testing
+        let force_summary_task_index = context
+            .add_task("Force Summary Task".to_string(), 0)
+            .into_inner()
+            .1;
+        context.move_to(force_summary_task_index.clone());
+        let force_summary_text = "Forced completion with summary".to_string();
+
+        // 4. Succeed completion *with* force, *with* summary
+        let result_force_with_summary = context.complete_task(
+            force_summary_task_index.clone(),
+            None,
+            true,
+            Some(force_summary_text.clone()),
+        );
+        assert!(result_force_with_summary.inner().is_ok());
+        assert!(*result_force_with_summary.inner().as_ref().unwrap());
+
+        // Verify task is completed and summary *is* stored
+        let task = context.get_task(force_summary_task_index.clone()).unwrap();
+        assert!(task.is_completed());
+        assert_eq!(task.completion_summary(), Some(&force_summary_text));
     }
 }
