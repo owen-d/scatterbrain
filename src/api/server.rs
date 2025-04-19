@@ -8,9 +8,10 @@ use std::pin::Pin;
 use std::task::{Context, Poll};
 
 use axum::{
-    extract::State,
+    extract::{Path, State},
+    http::StatusCode,
     response::{Html, IntoResponse},
-    routing::{get, post},
+    routing::{delete, get, post},
     Json, Router,
 };
 use futures::Stream;
@@ -19,7 +20,7 @@ use tokio::net::TcpListener;
 use tower_http::cors::{Any, CorsLayer};
 
 use crate::models::PlanResponse;
-use crate::models::{self, Index};
+use crate::models::{self, parse_index, Index};
 use crate::Core;
 
 /// Request to add a new task
@@ -121,6 +122,7 @@ pub async fn serve(core: Core, config: ServerConfig) -> Result<(), Box<dyn std::
         .route("/api/task/level", post(change_level))
         .route("/api/task/lease", post(generate_lease))
         .route("/api/move", post(move_to))
+        .route("/api/tasks/*index", delete(remove_task_handler))
         .route("/ui", get(ui_handler))
         .route("/ui/events", get(events_handler))
         .layer(cors)
@@ -200,6 +202,56 @@ async fn move_to(
         Json(ApiResponse::error(
             "Failed to move to requested task".to_string(),
         ))
+    }
+}
+
+async fn remove_task_handler(
+    State(core): State<Core>,
+    Path(index_str): Path<String>,
+) -> impl IntoResponse {
+    // Parse the index string
+    let index = match parse_index(&index_str) {
+        Ok(idx) => idx,
+        Err(e) => {
+            return (
+                StatusCode::BAD_REQUEST,
+                Json(ApiResponse::<()>::error(format!(
+                    "Invalid index format: {}",
+                    e
+                ))),
+            )
+                .into_response();
+        }
+    };
+
+    // Call the core logic
+    let result_response = core.remove_task(index);
+
+    // Map the inner result from core to the final HTTP response
+    match result_response.inner() {
+        Ok(_) => (
+            StatusCode::OK,
+            // Success: Wrap the PlanResponse (containing the removed Task)
+            Json(ApiResponse::success(result_response)),
+        )
+            .into_response(),
+        Err(e) => {
+            // Determine status code based on error message
+            let status = if e.contains("not found") || e.contains("out of bounds") {
+                StatusCode::NOT_FOUND
+            } else {
+                StatusCode::BAD_REQUEST // e.g., trying to remove root
+            };
+            // Error: Wrap the error message (still contained within the original PlanResponse)
+            // We need to clone the error string to put into ApiResponse::error
+            let error_message = e.clone();
+            // We also need the context from the original response
+            let _context = result_response.distilled_context;
+            // Construct the error response using ApiResponse::error
+            (status, Json(ApiResponse::<()>::error(error_message))).into_response()
+            // Note: We lose the original PlanResponse structure here on error, sending only the message.
+            // If preserving the full PlanResponse on error is desired, adjust the structure.
+        }
     }
 }
 

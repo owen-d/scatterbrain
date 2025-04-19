@@ -4,7 +4,7 @@
 
 use std::sync::Arc;
 
-use reqwest::{Client as ReqwestClient, Error as ReqwestError};
+use reqwest::{Client as ReqwestClient, Error as ReqwestError, Method};
 use serde::Deserialize;
 
 use crate::models;
@@ -357,6 +357,71 @@ impl Client {
                         .error
                         .unwrap_or_else(|| "Unknown API error".to_string()),
                 ))
+            }
+        } else {
+            let err_text = response
+                .text()
+                .await
+                .unwrap_or_else(|_| "Failed to read error body".to_string());
+            Err(ClientError::Api(format!(
+                "HTTP error: {}. Body: {}",
+                status, err_text
+            )))
+        }
+    }
+
+    /// Removes a task by its index
+    pub async fn remove_task(
+        &self,
+        index: Index,
+    ) -> Result<models::PlanResponse<models::Task>, ClientError> {
+        // Format the index vector into a comma-separated string
+        let index_str = index
+            .iter()
+            .map(|i| i.to_string())
+            .collect::<Vec<_>>()
+            .join(",");
+
+        let url = format!("{}/api/tasks/{}", self.config.base_url, index_str);
+
+        // Use the generic request helper method
+        self.request(Method::DELETE, &url, None::<()>).await
+    }
+
+    /// Generic request helper
+    async fn request<
+        T: for<'de> Deserialize<'de> + Send + 'static,
+        ReqBody: serde::Serialize + Send + Sync,
+    >(
+        &self,
+        method: Method,
+        url: &str,
+        body: Option<ReqBody>,
+    ) -> Result<models::PlanResponse<T>, ClientError> {
+        let mut request_builder = self.http_client.request(method, url);
+        if let Some(b) = body {
+            request_builder = request_builder.json(&b);
+        }
+
+        let response = request_builder.send().await?;
+        let status = response.status();
+
+        if status.is_success() {
+            let api_response: ApiResponse<models::PlanResponse<T>> = match response.json().await {
+                Ok(data) => data,
+                Err(e) => {
+                    return Err(ClientError::Api(format!(
+                        "Failed to parse success response: {}",
+                        e
+                    )))
+                }
+            };
+            if api_response.success {
+                api_response.data.ok_or(ClientError::MissingData)
+            } else {
+                Err(ClientError::Api(api_response.error.unwrap_or_else(|| {
+                    "Unknown API error on failure".to_string()
+                })))
             }
         } else {
             let err_text = response

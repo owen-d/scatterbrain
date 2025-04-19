@@ -8,7 +8,10 @@ use std::io;
 
 use crate::{
     api::{serve, Client, ClientConfig, ClientError, ServerConfig},
-    models::{default_levels, parse_index, Context, Core, Plan, PlanResponse, TaskTreeNode},
+    models::{
+        default_levels, parse_index, Context, Core, Current, Lease, Plan, PlanResponse, Task,
+        TaskTreeNode,
+    },
 };
 
 #[derive(Parser)]
@@ -104,6 +107,12 @@ enum TaskCommands {
 
     /// Generate a lease for the task at the given index
     Lease {
+        /// Task index (e.g., 0 or 0,1,2 for nested tasks)
+        index: String,
+    },
+
+    /// Remove a task by its index
+    Remove {
         /// Task index (e.g., 0 or 0,1,2 for nested tasks)
         index: String,
     },
@@ -212,13 +221,43 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
                     // Generate the lease
                     let response = client.generate_lease(parsed_index).await?;
 
-                    print_response(&response, |lease| {
+                    print_response(&response, |lease: &Lease| {
                         println!(
                             "Generated lease {} for task at index: {}",
                             lease.value(),
                             index
                         );
                     });
+                    Ok(())
+                }
+
+                TaskCommands::Remove { index } => {
+                    // Parse the index string
+                    let parsed_index = match parse_index(index) {
+                        Ok(idx) => idx,
+                        Err(e) => {
+                            eprintln!("Error parsing index: {}", e);
+                            return Err(e.into()); // Exit if index is invalid
+                        }
+                    };
+
+                    // Call the client method to remove the task
+                    match client.remove_task(parsed_index).await {
+                        Ok(response) => {
+                            print_response(&response, |removed_task: &Task| {
+                                println!(
+                                    "Removed task: \"{}\" at index: {}",
+                                    removed_task.description(),
+                                    index // Use original string for display
+                                );
+                            });
+                        }
+                        Err(e) => {
+                            eprintln!("Error removing task: {}", e);
+                            // Consider printing distilled context even on error?
+                            // For now, just print the error.
+                        }
+                    };
                     Ok(())
                 }
             };
@@ -234,7 +273,7 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
 
             let response = client.move_to(parsed_index).await?;
 
-            print_response(&response, |description| {
+            print_response(&response, |description: &Option<String>| {
                 println!(
                     "Moved to task: \"{}\" at index: {}",
                     description.as_deref().unwrap_or("Unknown"),
@@ -259,7 +298,7 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
 
             let result = match client.get_current().await {
                 Ok(current_response) => {
-                    print_response(&current_response, |current| {
+                    print_response(&current_response, |current: &Option<Current>| {
                         // Check if we have a current task
                         if let Some(current) = current {
                             // Print current task info
@@ -554,6 +593,7 @@ TASK MANAGEMENT:
   $ scatterbrain task complete [--lease <ID>] [--force] [--summary <TEXT>] Complete current task (summary required unless --force)
   $ scatterbrain task change-level <LEVEL_INDEX>               Change current task's abstraction level
   $ scatterbrain task lease <INDEX>                            Generate a lease for a task
+  $ scatterbrain task remove <INDEX>                           Remove a task by its index (e.g., 0,1,2)
   
 NAVIGATION:
   $ scatterbrain move <INDEX>                                  Navigate to a task (e.g., 0 or 0,1,2)

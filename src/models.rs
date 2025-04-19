@@ -296,6 +296,70 @@ impl Context {
         PlanResponse::new((task_clone, new_index), self.distilled_context().context())
     }
 
+    /// Removes the task at the given index
+    /// Returns the removed task on success, or an error message on failure
+    pub fn remove_task(&mut self, index: Index) -> PlanResponse<Result<Task, String>> {
+        self.log_transition(
+            "remove_task".to_string(),
+            Some(format!("Attempting to remove task at index: {:?}", index)),
+        );
+
+        // Basic validation: Cannot remove root (empty index)
+        if index.is_empty() {
+            let err_msg = "Cannot remove the root task.".to_string();
+            self.log_transition("remove_task_failed".to_string(), Some(err_msg.clone()));
+            return PlanResponse::new(Err(err_msg), self.distilled_context().context());
+        }
+
+        // Separate the last index (child index) from the parent path
+        let child_idx = index.last().unwrap(); // We know index is not empty
+        let parent_index = index[0..index.len() - 1].to_vec();
+
+        // Get the parent task mutably
+        let parent_task = match self.get_task_mut(parent_index.clone()) {
+            Some(task) => task,
+            None => {
+                let err_msg = format!("Parent task at index {:?} not found.", parent_index);
+                self.log_transition("remove_task_failed".to_string(), Some(err_msg.clone()));
+                return PlanResponse::new(Err(err_msg), self.distilled_context().context());
+            }
+        };
+
+        // Validate the child index and remove the task
+        if *child_idx >= parent_task.subtasks.len() {
+            let err_msg = format!(
+                "Child index {} out of bounds for parent {:?}",
+                child_idx, parent_index
+            );
+            self.log_transition("remove_task_failed".to_string(), Some(err_msg.clone()));
+            return PlanResponse::new(Err(err_msg), self.distilled_context().context());
+        }
+
+        // Remove the task
+        let removed_task = parent_task.subtasks.remove(*child_idx);
+
+        // Remove associated lease if it exists
+        self.leases.remove(&index);
+
+        // Adjust cursor if necessary
+        // If the cursor was pointing to the removed task or one of its descendants,
+        // move the cursor to the parent task.
+        if self.cursor.starts_with(&index) {
+            self.cursor = parent_index;
+            self.log_transition(
+                "cursor_adjusted_after_removal".to_string(),
+                Some(format!("Cursor moved to parent {:?}", self.cursor)),
+            );
+        }
+
+        self.log_transition(
+            "remove_task_success".to_string(),
+            Some(format!("Removed task: '{}'", removed_task.description())),
+        );
+
+        PlanResponse::new(Ok(removed_task), self.distilled_context().context())
+    }
+
     /// Moves to the task at the given index
     pub fn move_to(&mut self, index: Index) -> PlanResponse<Option<String>> {
         self.log_transition(
@@ -941,6 +1005,11 @@ impl Core {
         self.with_context(|context| context.generate_lease(index))
     }
 
+    /// Removes the task at the given index
+    pub fn remove_task(&self, index: Index) -> PlanResponse<Result<Task, String>> {
+        self.with_context(|context| context.remove_task(index))
+    }
+
     // Subscribe to state updates
     pub fn subscribe(&self) -> tokio::sync::broadcast::Receiver<()> {
         self.update_tx.subscribe()
@@ -1492,5 +1561,83 @@ mod tests {
         let task = context.get_task(force_summary_task_index.clone()).unwrap();
         assert!(task.is_completed());
         assert_eq!(task.completion_summary(), Some(&force_summary_text));
+    }
+
+    #[test]
+    fn test_task_removal() {
+        // Setup: Create a context with a few nested tasks
+        let plan = Plan::new(default_levels());
+        let mut context = Context::new(plan);
+
+        let task0_idx = context.add_task("Task 0".to_string(), 0).into_inner().1; // [0]
+        context.move_to(task0_idx.clone());
+        let _task0_0_idx = context.add_task("Task 0.0".to_string(), 1).into_inner().1; // [0, 0]
+        let task0_1_idx = context.add_task("Task 0.1".to_string(), 1).into_inner().1; // [0, 1]
+        context.move_to(task0_1_idx.clone());
+        let task0_1_0_idx = context.add_task("Task 0.1.0".to_string(), 2).into_inner().1; // [0, 1, 0]
+
+        // Generate a lease for the task we intend to remove
+        let _ = context.generate_lease(task0_1_idx.clone());
+        assert!(context.leases.contains_key(&task0_1_idx));
+
+        // Move cursor to a child of the task to be removed
+        context.move_to(task0_1_0_idx.clone());
+        assert_eq!(*context.get_current_index().inner(), task0_1_0_idx);
+
+        // 1. Test successful removal
+        let remove_result = context.remove_task(task0_1_idx.clone());
+        assert!(remove_result.inner().is_ok(), "Removal should succeed");
+        let removed_task = remove_result.into_inner().unwrap();
+        assert_eq!(removed_task.description(), "Task 0.1");
+
+        // Verify task is gone from parent
+        let parent_task = context.get_task(task0_idx.clone()).unwrap();
+        assert_eq!(parent_task.subtasks().len(), 1); // Only Task 0.0 should remain
+        assert_eq!(parent_task.subtasks()[0].description(), "Task 0.0");
+
+        // Verify cursor was adjusted to parent
+        assert_eq!(
+            *context.get_current_index().inner(),
+            task0_idx,
+            "Cursor should move to parent after removal"
+        );
+
+        // Verify lease was removed
+        assert!(
+            !context.leases.contains_key(&task0_1_idx),
+            "Lease should be removed after task removal"
+        );
+
+        // 2. Test removing root (empty index)
+        let remove_root_result = context.remove_task(vec![]);
+        assert!(remove_root_result.inner().is_err());
+        assert!(remove_root_result
+            .inner()
+            .as_ref()
+            .err()
+            .unwrap()
+            .contains("Cannot remove the root task"));
+
+        // 3. Test removing non-existent index (invalid parent)
+        let invalid_parent_idx = vec![5, 0];
+        let remove_invalid_parent_result = context.remove_task(invalid_parent_idx);
+        assert!(remove_invalid_parent_result.inner().is_err());
+        assert!(remove_invalid_parent_result
+            .inner()
+            .as_ref()
+            .err()
+            .unwrap()
+            .contains("Parent task at index [5] not found"));
+
+        // 4. Test removing non-existent index (invalid child index)
+        let invalid_child_idx = vec![0, 5]; // Parent [0] exists, child 5 does not
+        let remove_invalid_child_result = context.remove_task(invalid_child_idx);
+        assert!(remove_invalid_child_result.inner().is_err());
+        assert!(remove_invalid_child_result
+            .inner()
+            .as_ref()
+            .err()
+            .unwrap()
+            .contains("Child index 5 out of bounds"));
     }
 }
