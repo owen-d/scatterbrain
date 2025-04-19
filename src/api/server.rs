@@ -42,6 +42,19 @@ pub struct ChangeLevelRequest {
     pub level_index: usize,
 }
 
+/// Request to complete a task, possibly with lease
+#[derive(Serialize, Deserialize)]
+pub struct CompleteTaskRequest {
+    pub lease: Option<u8>,
+    pub force: bool,
+}
+
+/// Request to generate a lease for a task
+#[derive(Serialize, Deserialize)]
+pub struct LeaseRequest {
+    pub index: Index,
+}
+
 /// Server configuration
 #[derive(Clone, Debug)]
 pub struct ServerConfig {
@@ -105,6 +118,7 @@ pub async fn serve(core: Core, config: ServerConfig) -> Result<(), Box<dyn std::
         .route("/api/task", post(add_task))
         .route("/api/task/complete", post(complete_task))
         .route("/api/task/level", post(change_level))
+        .route("/api/task/lease", post(generate_lease))
         .route("/api/move", post(move_to))
         .route("/ui", get(ui_handler))
         .route("/ui/events", get(events_handler))
@@ -143,13 +157,17 @@ async fn add_task(
     Json(ApiResponse::success(response))
 }
 
-async fn complete_task(State(core): State<Core>) -> JSONResp<bool> {
-    let response = core.complete_task();
-    let ok = *response.inner();
-    if ok {
+async fn complete_task(
+    State(core): State<Core>,
+    Json(payload): Json<CompleteTaskRequest>,
+) -> JSONResp<bool> {
+    let response = core.complete_task(payload.lease, payload.force);
+    if *response.inner() {
         Json(ApiResponse::success(response))
     } else {
-        Json(ApiResponse::error("Failed to complete task".to_string()))
+        Json(ApiResponse::error(
+            "Failed to complete task (lease mismatch or other issue)".to_string(),
+        ))
     }
 }
 
@@ -158,6 +176,14 @@ async fn change_level(
     Json(payload): Json<ChangeLevelRequest>,
 ) -> JSONResp<Result<(), String>> {
     let response = core.change_level(payload.index, payload.level_index);
+    Json(ApiResponse::success(response))
+}
+
+async fn generate_lease(
+    State(core): State<Core>,
+    Json(payload): Json<LeaseRequest>,
+) -> JSONResp<models::Lease> {
+    let response = core.generate_lease(payload.index);
     Json(ApiResponse::success(response))
 }
 

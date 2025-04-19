@@ -20,6 +20,7 @@ clap = { version = "4.4", features = ["derive"] }
 clap_complete = "4.4"
 futures = "0.3"
 chrono = { version = "0.4", features = ["serde"] }
+rand = "0.9.1"
 
 # The library portion of the crate
 [lib]

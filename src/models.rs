@@ -3,7 +3,11 @@
 //! This module contains the core data types and business logic for the scatterbrain tool.
 
 use chrono::{DateTime, Utc};
+use rand::prelude::*;
+use rand::rngs::StdRng;
+use rand::SeedableRng;
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 use std::collections::VecDeque;
 use std::sync::{Arc, Mutex};
 
@@ -182,11 +186,24 @@ pub fn parse_index(index_str: &str) -> Result<Index, Box<dyn std::error::Error>>
     }
 }
 
+/// Represents a lease token for task completion
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Hash)]
+pub struct Lease(u8);
+
+impl Lease {
+    /// Returns the inner value of the lease.
+    pub fn value(&self) -> u8 {
+        self.0
+    }
+}
+
 /// Context for managing the planning process
 pub struct Context {
     plan: Plan,
     cursor: Index,
     history: VecDeque<TransitionLogEntry>,
+    leases: HashMap<Index, Lease>,
+    rng: StdRng,
 }
 
 // Define the maximum size for the history buffer
@@ -199,6 +216,8 @@ impl Context {
             plan,
             cursor: Vec::new(),                                 // Start at root
             history: VecDeque::with_capacity(MAX_HISTORY_SIZE), // Initialize history
+            leases: HashMap::new(),                             // Initialize leases
+            rng: StdRng::seed_from_u64(0),                      // Initialize RNG with seed 0
         }
     }
 
@@ -209,6 +228,23 @@ impl Context {
         }
         self.history
             .push_back(TransitionLogEntry::new(action, details));
+    }
+
+    /// Generates a new lease for the task at the given index
+    pub fn generate_lease(&mut self, index: Index) -> PlanResponse<Lease> {
+        let lease_val = self.rng.random::<u8>();
+        let lease = Lease(lease_val);
+        self.leases.insert(index.clone(), lease);
+
+        self.log_transition(
+            "generate_lease".to_string(),
+            Some(format!(
+                "Generated lease {} for task {:?}",
+                lease_val, index
+            )),
+        );
+
+        PlanResponse::new(lease, self.distilled_context().context())
     }
 
     // Task creation and navigation
@@ -280,11 +316,42 @@ impl Context {
     }
 
     // Task state management
-    /// Completes the task at the given index
-    pub fn complete_task(&mut self, index: Index) -> PlanResponse<bool> {
+    /// Completes the task at the given index, checking the lease if provided
+    pub fn complete_task(
+        &mut self,
+        index: Index,
+        lease_attempt: Option<Lease>,
+        force: bool,
+    ) -> PlanResponse<Result<bool, String>> {
+        // Lease check
+        if !force {
+            if let Some(required_lease) = self.leases.get(&index) {
+                if lease_attempt.is_none() {
+                    let msg = format!(
+                        "Task at index {:?} requires a lease to be completed.",
+                        index
+                    );
+                    self.log_transition("complete_task_failed".to_string(), Some(msg.clone()));
+                    return PlanResponse::new(Err(msg), self.distilled_context().context());
+                }
+                if lease_attempt != Some(*required_lease) {
+                    let msg = format!(
+                        "Lease mismatch for task {:?}. Provided: {:?}, Required: {:?}",
+                        index, lease_attempt, required_lease
+                    );
+                    self.log_transition("complete_task_failed".to_string(), Some(msg.clone()));
+                    return PlanResponse::new(Err(msg), self.distilled_context().context());
+                }
+            }
+            // If no lease exists for the index, completion is allowed without a lease (unless forced)
+        }
+
         self.log_transition(
             "complete_task".to_string(),
-            Some(format!("Completing task at index: {:?}", index)),
+            Some(format!(
+                "Completing task at index: {:?} (force: {})",
+                index, force
+            )),
         );
 
         // First, get a clone of the task for generating suggestions
@@ -293,6 +360,8 @@ impl Context {
         // Complete the task
         let success = if let Some(task) = self.get_task_mut(index.clone()) {
             task.complete();
+            // Remove the lease once completed
+            self.leases.remove(&index);
             true
         } else {
             false
@@ -305,12 +374,12 @@ impl Context {
                 task_clone.complete();
 
                 // Get level information
-                return PlanResponse::new(success, self.distilled_context().context());
+                return PlanResponse::new(Ok(success), self.distilled_context().context());
             }
         }
 
         // Fallback if task not found or clone unavailable
-        PlanResponse::new(success, self.distilled_context().context())
+        PlanResponse::new(Ok(success), self.distilled_context().context())
     }
 
     /// Changes the level of a task at the given index,
@@ -805,19 +874,41 @@ impl Core {
         self.with_context(|context| context.add_task(description, level_index))
     }
 
-    pub fn complete_task(&self) -> PlanResponse<bool> {
+    pub fn complete_task(&self, lease_attempt: Option<u8>, force: bool) -> PlanResponse<bool> {
         self.with_context(|context| {
-            // Get the current index as PlanResponse<Index>
-            let index_response = context.get_current_index();
-            // Extract just the index value
-            let index = index_response.inner().clone();
-            // Complete the task
-            context.complete_task(index)
+            // Get the current index first
+            let index = context.get_current_index().into_inner();
+
+            // Map the Option<u8> to Option<Lease>
+            let lease_attempt_typed = lease_attempt.map(Lease);
+
+            // Call the context method which returns PlanResponse<Result<bool, String>>
+            let result_response = context.complete_task(index, lease_attempt_typed, force);
+
+            // Extract the inner Result<bool, String>
+            let inner_result = result_response.into_inner();
+
+            // Get the *current* distilled context by calling the method and extracting the field
+            let distilled_context = context.distilled_context().distilled_context;
+
+            // Now package the final PlanResponse<bool>
+            match inner_result {
+                Ok(success) => PlanResponse::new(success, distilled_context),
+                Err(e) => {
+                    eprintln!("Error completing task: {}", e);
+                    PlanResponse::new(false, distilled_context) // Return false in case of error
+                }
+            }
         })
     }
 
     pub fn move_to(&self, index: Index) -> PlanResponse<Option<String>> {
         self.with_context(|context| context.move_to(index))
+    }
+
+    /// Generate a lease for the task at the given index
+    pub fn generate_lease(&self, index: Index) -> PlanResponse<Lease> {
+        self.with_context(|context| context.generate_lease(index))
     }
 
     // Subscribe to state updates
@@ -893,8 +984,12 @@ mod tests {
         let task1_index = context.add_task("Task 1".to_string(), 0).into_inner().1;
         let task2_index = context.add_task("Task 2".to_string(), 0).into_inner().1;
 
-        // Complete a task
-        assert!(*context.complete_task(task1_index.clone()).inner());
+        // Complete a task (no lease required yet)
+        assert!(context
+            .complete_task(task1_index.clone(), None, false)
+            .inner()
+            .as_ref()
+            .unwrap());
 
         // Verify the task is completed
         let task = context.get_task(task1_index).unwrap();
@@ -980,11 +1075,11 @@ mod tests {
         assert!(move_response.inner().is_some());
         let (level, task, task_history) = context.get_current_with_history().unwrap();
 
-        // Verify the level is correct (we're at depth 3, so using isolation level)
-        assert_eq!(level.description(), default_levels()[2].description());
+        // Verify the level is correct (task has explicit level 1 - Isolation)
+        assert_eq!(level.description(), default_levels()[1].description());
         assert_eq!(
             level.abstraction_focus(),
-            default_levels()[2].abstraction_focus()
+            default_levels()[1].abstraction_focus()
         );
 
         // Verify the task is correct
@@ -1091,7 +1186,7 @@ mod tests {
         );
         assert_eq!(context.history.back().unwrap().action, "move_to");
 
-        context.add_task("Subtask 1".to_string(), 1);
+        let subtask_index = context.add_task("Subtask 1".to_string(), 1).into_inner().1;
         let history_len_after_add2 = context.history.len();
         assert_eq!(
             history_len_after_add2, 3,
@@ -1099,7 +1194,7 @@ mod tests {
         );
         assert_eq!(context.history.back().unwrap().action, "add_task");
 
-        context.complete_task(vec![0, 0]); // Complete Subtask 1
+        context.complete_task(subtask_index, None, false); // Complete Subtask 1
         let history_len_after_complete = context.history.len();
         assert_eq!(
             history_len_after_complete, 4,
@@ -1152,8 +1247,8 @@ mod tests {
             &Some("Task through Core".to_string())
         );
 
-        // Complete the task
-        assert!(*core.complete_task().inner());
+        // Complete the task (no lease)
+        assert!(*core.complete_task(None, false).inner());
 
         // Verify task is completed via Current
         let current_response = core.current();
@@ -1181,5 +1276,101 @@ mod tests {
 
         assert_eq!(plan.levels().len(), 4);
         assert_eq!(plan.level_count(), 4);
+    }
+
+    #[test]
+    fn test_lease_system() {
+        let plan = Plan::new(default_levels());
+        let context = Context::new(plan);
+        let core = Core::new(context); // Use Core for interacting
+
+        // Add a task
+        let task_index = core
+            .add_task("Task with Lease".to_string(), 0)
+            .into_inner()
+            .1;
+
+        // --- IMPORTANT: Move to the task before generating lease and completing ---
+        core.move_to(task_index.clone());
+
+        // Generate a lease FOR THE CURRENT TASK (after moving)
+        let lease_response = core.generate_lease(task_index.clone());
+        let generated_lease = lease_response.inner().value(); // Use .value()
+
+        // --- Test Completion --- //
+
+        // 1. Fail completion without lease
+        let complete_fail_no_lease = core.complete_task(None, false);
+        assert!(
+            !complete_fail_no_lease.inner(),
+            "Completion should fail without lease"
+        );
+
+        // 2. Fail completion with wrong lease
+        let wrong_lease = generated_lease.wrapping_add(1); // Ensure different lease
+        let complete_fail_wrong_lease = core.complete_task(Some(wrong_lease), false);
+        assert!(
+            !complete_fail_wrong_lease.inner(),
+            "Completion should fail with wrong lease"
+        );
+
+        // 3. Succeed completion with correct lease
+        let complete_success = core.complete_task(Some(generated_lease), false);
+        assert!(
+            complete_success.inner(),
+            "Completion should succeed with correct lease"
+        );
+
+        // Verify task is completed
+        let task = core
+            .get_plan()
+            .into_inner()
+            .get_with_history(task_index.clone())
+            .unwrap()
+            .1;
+        assert!(
+            task.is_completed(),
+            "Task should be completed after successful lease completion"
+        );
+
+        // --- Test Force Completion --- //
+
+        // Add another task
+        let task2_index = core
+            .add_task("Task Force Lease".to_string(), 0)
+            .into_inner()
+            .1;
+
+        // --- IMPORTANT: Move to the second task before generating lease and completing ---
+        core.move_to(task2_index.clone());
+
+        let lease2_response = core.generate_lease(task2_index.clone());
+        let _generated_lease2 = lease2_response.inner().value(); // Use .value()
+
+        // 4. Succeed completion with --force, even without lease
+        let complete_force_no_lease = core.complete_task(None, true);
+        assert!(
+            complete_force_no_lease.inner(),
+            "Completion should succeed with force, no lease"
+        );
+        let task2 = core
+            .get_plan()
+            .into_inner()
+            .get_with_history(task2_index.clone())
+            .unwrap()
+            .1;
+        assert!(task2.is_completed(), "Task 2 should be completed via force");
+
+        // --- Test Lease Removal --- //
+        // Check if lease was removed after completion (test this indirectly via Context)
+        let context_lock = core.inner.lock().unwrap();
+        assert!(
+            !context_lock.leases.contains_key(&task_index),
+            "Lease should be removed after successful completion"
+        );
+        assert!(
+            !context_lock.leases.contains_key(&task2_index),
+            "Lease should be removed after forced completion"
+        );
     }
 }

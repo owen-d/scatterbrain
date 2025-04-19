@@ -80,7 +80,15 @@ enum TaskCommands {
     },
 
     /// Complete the current task
-    Complete,
+    Complete {
+        /// The lease required to complete the task
+        #[arg(long)]
+        lease: Option<u8>,
+
+        /// Force completion even if lease doesn't match
+        #[arg(long, default_value_t = false)]
+        force: bool,
+    },
 
     /// Change the abstraction level of the current task
     #[command(name = "change-level")]
@@ -88,6 +96,12 @@ enum TaskCommands {
         /// Level index (starting from 0)
         #[arg(help = "The level index to set (lower index = higher abstraction level)")]
         level_index: usize,
+    },
+
+    /// Generate a lease for the task at the given index
+    Lease {
+        /// Task index (e.g., 0 or 0,1,2 for nested tasks)
+        index: String,
     },
 }
 
@@ -140,11 +154,18 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
                     Ok(())
                 }
 
-                TaskCommands::Complete => {
-                    let response = client.complete_task().await?;
+                TaskCommands::Complete { lease, force } => {
+                    // Pass lease and force to the client call
+                    let response = client.complete_task(*lease, *force).await?;
 
-                    print_response(&response, |_| {
-                        println!("Completed the current task");
+                    print_response(&response, |success| {
+                        if *success {
+                            println!("Completed the current task");
+                        } else {
+                            println!(
+                                "Failed to complete task (lease mismatch? use --force to override)"
+                            );
+                        }
                     });
 
                     Ok(())
@@ -171,7 +192,23 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
                             level_index
                         );
                     });
+                    Ok(())
+                }
 
+                TaskCommands::Lease { index } => {
+                    // Parse the index string
+                    let parsed_index = parse_index(index)?;
+
+                    // Generate the lease
+                    let response = client.generate_lease(parsed_index).await?;
+
+                    print_response(&response, |lease| {
+                        println!(
+                            "Generated lease {} for task at index: {}",
+                            lease.value(),
+                            index
+                        );
+                    });
                     Ok(())
                 }
             };
@@ -476,7 +513,8 @@ MOVING UP:
      $ scatterbrain distilled
      
    - Complete tasks when finished:
-     $ scatterbrain task complete
+     $ scatterbrain task complete --lease <LEASE_ID>  # Optionally provide lease
+     $ scatterbrain task complete --force           # Or force completion
      
    - Move between tasks to adapt to changing priorities:
      $ scatterbrain move 1,2
@@ -491,8 +529,9 @@ MOVING UP:
 
 TASK MANAGEMENT:
   $ scatterbrain task add --level <LEVEL> "Task description"    Create new task (level is required)
-  $ scatterbrain task complete                                 Complete current task
+  $ scatterbrain task complete [--lease <ID>] [--force]         Complete current task (lease/force optional)
   $ scatterbrain task change-level <LEVEL_INDEX>               Change current task's abstraction level
+  $ scatterbrain task lease <INDEX>                            Generate a lease for a task
   
 NAVIGATION:
   $ scatterbrain move <INDEX>                                  Navigate to a task (e.g., 0 or 0,1,2)

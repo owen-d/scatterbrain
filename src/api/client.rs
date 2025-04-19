@@ -10,7 +10,10 @@ use serde::Deserialize;
 use crate::models;
 use crate::models::Index;
 
-use super::server::{AddTaskRequest, ChangeLevelRequest, MoveToRequest};
+// Import the request structs from the server module
+use super::server::{
+    AddTaskRequest, ChangeLevelRequest, CompleteTaskRequest, LeaseRequest, MoveToRequest,
+};
 
 /// API client configuration
 #[derive(Debug, Clone)]
@@ -198,28 +201,53 @@ impl Client {
     }
 
     /// Complete the current task
-    pub async fn complete_task(&self) -> Result<models::PlanResponse<bool>, ClientError> {
+    pub async fn complete_task(
+        &self,
+        lease: Option<u8>,
+        force: bool,
+    ) -> Result<models::PlanResponse<bool>, ClientError> {
         let url = format!("{}/api/task/complete", self.config.base_url);
-        let response = self.http_client.post(&url).send().await?;
 
-        if response.status().is_success() {
-            let api_response: ApiResponse<models::PlanResponse<bool>> = response.json().await?;
+        // Use the imported CompleteTaskRequest struct
+        let request = CompleteTaskRequest { lease, force };
+
+        let response = self.http_client.post(&url).json(&request).send().await?;
+        let status = response.status(); // Read status before potentially consuming body
+
+        if status.is_success() {
+            let api_response: ApiResponse<models::PlanResponse<bool>> = match response.json().await
+            {
+                Ok(data) => data,
+                Err(e) => {
+                    return Err(ClientError::Api(format!(
+                        "Failed to parse success response: {}",
+                        e
+                    )))
+                }
+            };
             if api_response.success {
                 api_response.data.ok_or(ClientError::MissingData)
             } else {
-                Err(ClientError::Api(
-                    api_response
-                        .error
-                        .unwrap_or_else(|| "Unknown API error".to_string()),
-                ))
+                // The API returns success=false if completion fails (e.g., lease mismatch)
+                // Extract the PlanResponse<bool> which should contain 'false'
+                api_response.data.ok_or_else(|| {
+                    ClientError::Api(
+                        api_response
+                            .error
+                            .unwrap_or_else(|| "Unknown API error on failure".to_string()),
+                    )
+                })
             }
         } else {
-            let api_response: ApiResponse<()> = response.json().await?;
-            Err(ClientError::Api(
-                api_response
-                    .error
-                    .unwrap_or_else(|| "Unknown API error".to_string()),
-            ))
+            // Handle non-200 HTTP errors
+            let err_text = response
+                .text()
+                .await
+                .unwrap_or_else(|_| "Failed to read error body".to_string());
+            Err(ClientError::Api(format!(
+                "HTTP error: {}. Body: {}",
+                status, err_text
+            )))
         }
     }
 
@@ -289,6 +317,51 @@ impl Client {
                     .error
                     .unwrap_or_else(|| "Unknown API error".to_string()),
             ))
+        }
+    }
+
+    /// Generate a lease for a specific task
+    pub async fn generate_lease(
+        &self,
+        index: Index,
+    ) -> Result<models::PlanResponse<models::Lease>, ClientError> {
+        let url = format!("{}/api/task/lease", self.config.base_url);
+
+        // Use the imported LeaseRequest struct
+        let request = LeaseRequest { index };
+
+        let response = self.http_client.post(&url).json(&request).send().await?;
+        let status = response.status(); // Read status before potentially consuming body
+
+        if status.is_success() {
+            let api_response: ApiResponse<models::PlanResponse<models::Lease>> =
+                match response.json().await {
+                    Ok(data) => data,
+                    Err(e) => {
+                        return Err(ClientError::Api(format!(
+                            "Failed to parse success response: {}",
+                            e
+                        )))
+                    }
+                };
+            if api_response.success {
+                api_response.data.ok_or(ClientError::MissingData)
+            } else {
+                Err(ClientError::Api(
+                    api_response
+                        .error
+                        .unwrap_or_else(|| "Unknown API error".to_string()),
+                ))
+            }
+        } else {
+            let err_text = response
+                .text()
+                .await
+                .unwrap_or_else(|_| "Failed to read error body".to_string());
+            Err(ClientError::Api(format!(
+                "HTTP error: {}. Body: {}",
+                status, err_text
+            )))
         }
     }
 }
