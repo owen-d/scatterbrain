@@ -711,81 +711,149 @@ fn print_distilled_context_response<T>(response: &PlanResponse<T>) {
 
     println!("\n=== DISTILLED CONTEXT ===\n");
 
-    // Print usage summary
+    // Print usage summary (Consider making this optional or shorter in the future)
     println!("USAGE SUMMARY:");
     println!("{}", context.usage_summary);
     println!("");
 
-    // Print current task and level
-    println!("CURRENT POSITION:");
-    if let Some(task) = &context.current_task {
-        println!("  Current task: \"{}\"", task.description());
-        println!(
-            "  Completed: {}",
-            if task.is_completed() { "Yes" } else { "No" }
-        );
-    } else {
-        println!("  At root level (no task selected)");
+    // Helper function to find the current node in the tree
+    fn find_current_node(nodes: &[TaskTreeNode]) -> Option<&TaskTreeNode> {
+        for node in nodes {
+            if node.is_current {
+                return Some(node);
+            }
+            if !node.children.is_empty() {
+                if let Some(found) = find_current_node(&node.children) {
+                    return Some(found);
+                }
+            }
+        }
+        None
     }
 
-    if let Some(level) = &context.current_level {
+    // Print current task and level
+    println!("CURRENT POSITION:");
+    let mut current_level_index: Option<usize> = None; // To store the index of the current level
+
+    if let Some(current_node) = find_current_node(&context.task_tree) {
+        // Use the TaskTreeNode for index, description, completion status
+        let index_str = current_node
+            .index
+            .iter()
+            .map(|i| i.to_string())
+            .collect::<Vec<_>>()
+            .join(".");
         println!(
-            "  Current abstraction level: {} - {}",
-            level.name(),
-            level.description()
+            "  Task: \"{}\" {}",
+            current_node.description,
+            if current_node.completed {
+                "[✓]"
+            } else {
+                "[ ]"
+            }
         );
-        println!("  Focus: {}", level.abstraction_focus());
+        println!("  Index: {}", index_str);
+
+        // Try to get the level index from the actual Task data if available
+        if let Some(task) = &context.current_task {
+            current_level_index = task.level_index(); // Use explicit level if set
+        }
+
+        // If explicit level wasn't set in the Task, infer from index length
+        // (Note: This assumes depth corresponds to level if not explicitly set)
+        if current_level_index.is_none() && !current_node.index.is_empty() {
+            current_level_index = Some(current_node.index.len() - 1); // Infer level = depth
+        }
+    } else {
+        // No current node found in the tree, implies we are at the root
+        println!("  At root level (no task selected)");
+        // If at root, assume Level 0 is current for display purposes
+        if !context.levels.is_empty() {
+            current_level_index = Some(0);
+        }
+    }
+
+    // Print current level name based on the determined index
+    if let Some(idx) = current_level_index {
+        if let Some(level) = context.levels.get(idx) {
+            println!("  Level: {} ({})", idx, level.name());
+        } else {
+            println!("  Level: {} (Unknown - Index out of bounds)", idx); // Fallback if index invalid
+            current_level_index = None; // Invalidate index if level not found
+        }
+    } else {
+        // This case might happen if root has no levels defined, or task had invalid explicit level
+        println!("  Level: Unknown");
     }
     println!("");
 
-    // Print available levels
-    println!("AVAILABLE ABSTRACTION LEVELS:");
-    for (idx, level) in context.levels.iter().enumerate() {
-        println!(
-            "  Level {}: {} - {}",
-            idx,
-            level.name(),
-            level.description()
-        );
-        println!("    Focus: {}", level.abstraction_focus());
-
-        // Print a couple of sample questions for each level
-        let questions = level.questions();
-        if !questions.is_empty() {
-            println!("    Sample questions:");
-            for (_q_idx, question) in questions.iter().enumerate().take(2) {
-                println!("      • {}", question);
-            }
-
-            // Indicate if there are more questions
-            if questions.len() > 2 {
-                println!("      • ... and {} more", questions.len() - 2);
-            }
-        }
-        println!("");
-    }
-
-    // Print task tree
+    // Print task tree (moved up)
     println!("TASK TREE:");
     print_task_tree(&context.task_tree, 0);
+    println!(""); // Add separation after tree
+
+    // Print available levels compactly
+    println!("AVAILABLE LEVELS (more level information availabe via the `plan` command):");
+    let level_summary = context
+        .levels
+        .iter()
+        .enumerate()
+        .map(|(idx, level)| format!("{}:{}", idx, level.name()))
+        .collect::<Vec<_>>()
+        .join(" | ");
+    println!("  {}", level_summary);
+    println!(""); // Add separation
+
+    // Print details only for the current level (using the determined index)
+    if let Some(idx) = current_level_index {
+        if let Some(level) = context.levels.get(idx) {
+            println!("CURRENT LEVEL DETAILS (Level {}: {}):", idx, level.name());
+            println!("  Focus: {}", level.abstraction_focus());
+
+            // Print a couple of sample questions for the current level
+            let questions = level.questions();
+            if !questions.is_empty() {
+                println!("  Sample Questions:");
+                for question in questions.iter().take(2) {
+                    // Limit questions shown
+                    println!("    • {}", question);
+                }
+                // Indicate if there are more questions
+                if questions.len() > 2 {
+                    println!("    • ... and {} more", questions.len() - 2);
+                }
+            }
+            println!(""); // Add separation
+        }
+    }
 
     // Print followups and reminder
     if !response.suggested_followups.is_empty() {
-        println!("\nSuggested next steps:");
+        println!("Suggested next steps:");
         for followup in &response.suggested_followups {
             println!("  • {}", followup);
         }
+        println!(""); // Add separation
     }
 
     if let Some(reminder) = &response.reminder {
-        println!("\nReminder: {}", reminder);
+        println!("Reminder: {}", reminder);
+        println!(""); // Add separation
     }
 
-    println!("");
+    // Removed final redundant println("")
 }
 
 fn print_task_tree(nodes: &[TaskTreeNode], indent: usize) {
     for node in nodes {
+        // Format the index as a string (e.g., "0.1.2")
+        let index_str = node
+            .index
+            .iter()
+            .map(|i| i.to_string())
+            .collect::<Vec<_>>()
+            .join(".");
+
         // Create indentation
         let indent_str = "  ".repeat(indent);
 
@@ -795,10 +863,14 @@ fn print_task_tree(nodes: &[TaskTreeNode], indent: usize) {
         // Create completion status
         let completion_status = if node.completed { "[✓]" } else { "[ ]" };
 
-        // Print the task with appropriate formatting
+        // Print the task with appropriate formatting (including index)
         println!(
-            "{}{}{}{}",
-            indent_str, current_indicator, completion_status, node.description
+            "{}{}{} {} {}", // Format: indent indicator status index description
+            indent_str,
+            current_indicator,
+            completion_status,
+            index_str, // Add the index string here
+            node.description
         );
 
         // Recursively print children with increased indentation
