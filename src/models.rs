@@ -710,11 +710,6 @@ impl Context {
         self.get_task(self.cursor.clone())
     }
 
-    /// Gets the current task mutably
-    fn get_current_task_mut(&mut self) -> Option<&mut Task> {
-        self.get_task_mut(self.cursor.clone())
-    }
-
     /// Gets the current index
     pub fn get_current_index(&self) -> PlanResponse<Index> {
         // Get the current task and level for better context

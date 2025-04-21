@@ -9,7 +9,7 @@ use std::io;
 use crate::{
     api::{serve, Client, ClientConfig, ClientError, ServerConfig},
     models::{
-        default_levels, parse_index, Context, Core, Current, Lease, Plan, PlanResponse, Task,
+        default_levels, parse_index, Context, Core, Current, Plan, PlanResponse, Task,
         TaskTreeNode,
     },
 };
