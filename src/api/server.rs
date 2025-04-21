@@ -193,7 +193,7 @@ async fn change_level(
 async fn generate_lease(
     State(core): State<Core>,
     Json(payload): Json<LeaseRequest>,
-) -> JSONResp<models::Lease> {
+) -> JSONResp<(models::Lease, Vec<String>)> {
     let response = core.generate_lease(payload.index);
     Json(ApiResponse::success(response))
 }

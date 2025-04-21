@@ -314,7 +314,7 @@ impl Client {
     pub async fn generate_lease(
         &self,
         index: Index,
-    ) -> Result<models::PlanResponse<models::Lease>, ClientError> {
+    ) -> Result<models::PlanResponse<(models::Lease, Vec<String>)>, ClientError> {
         let url = format!("{}/api/task/lease", self.config.base_url);
 
         // Use the imported LeaseRequest struct
@@ -324,7 +324,7 @@ impl Client {
         let status = response.status(); // Read status before potentially consuming body
 
         if status.is_success() {
-            let api_response: ApiResponse<models::PlanResponse<models::Lease>> =
+            let api_response: ApiResponse<models::PlanResponse<(models::Lease, Vec<String>)>> =
                 match response.json().await {
                     Ok(data) => data,
                     Err(e) => {

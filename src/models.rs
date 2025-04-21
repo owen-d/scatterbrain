@@ -3,6 +3,7 @@
 //! This module contains the core data types and business logic for the scatterbrain tool.
 
 use chrono::{DateTime, Utc};
+use lazy_static::lazy_static;
 use rand::prelude::*;
 use rand::rngs::StdRng;
 use rand::SeedableRng;
@@ -13,6 +14,16 @@ use std::sync::{Arc, Mutex};
 
 // Re-export levels from the levels module
 pub use crate::levels::{default_levels, Level};
+
+lazy_static! {
+    static ref ROOT_VERIFICATION_SUGGESTIONS: Vec<String> = vec![
+        "Ensure compilation passes successfully.".to_string(),
+        "Ensure new logic is tested in the most concise and isolated way possible.".to_string(),
+        "Ensure the code written is DRY, idiomatic, and conforms to existing conventions."
+            .to_string(),
+        "Review code for clarity, maintainability, and potential edge cases.".to_string(),
+    ];
+}
 
 /// Represents a task in the LLM's work
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -244,21 +255,35 @@ impl Context {
             .push_back(TransitionLogEntry::new(action, details));
     }
 
-    /// Generates a new lease for the task at the given index
-    pub fn generate_lease(&mut self, index: Index) -> PlanResponse<Lease> {
+    /// Generates a new lease for the task at the given index,
+    /// returning the lease and a list of verification suggestions if it's the root task.
+    pub fn generate_lease(&mut self, index: Index) -> PlanResponse<(Lease, Vec<String>)> {
         let lease_val = self.rng.random::<u8>();
         let lease = Lease(lease_val);
         self.leases.insert(index.clone(), lease);
 
+        // Check if this is the root task
+        let verification_suggestions = if index.is_empty() {
+            // Return a clone of the static suggestions
+            ROOT_VERIFICATION_SUGGESTIONS.clone()
+        } else {
+            Vec::new() // No suggestions for non-root tasks
+        };
+
         self.log_transition(
             "generate_lease".to_string(),
             Some(format!(
-                "Generated lease {} for task {:?}",
-                lease_val, index
+                "Generated lease {} for task {:?}. Suggestions provided: {}",
+                lease_val,
+                index,
+                !verification_suggestions.is_empty()
             )),
         );
 
-        PlanResponse::new(lease, self.distilled_context().context())
+        PlanResponse::new(
+            (lease, verification_suggestions),
+            self.distilled_context().context(),
+        )
     }
 
     // Task creation and navigation
@@ -487,6 +512,13 @@ impl Context {
         };
 
         if success {
+            // Check if this is the root task being completed
+            if index.is_empty() {
+                // Root task completed - Verification logic removed as per redesign.
+                // Client is now responsible for checks before calling complete.
+                self.log_transition("plan_complete_root_task".to_string(), None);
+            }
+
             // Now that we've modified the task, use the clone for suggestions
             if let Some(mut task_clone) = task_clone_opt {
                 // Mark the clone as completed
@@ -1079,7 +1111,8 @@ impl Core {
     }
 
     /// Generate a lease for the task at the given index
-    pub fn generate_lease(&self, index: Index) -> PlanResponse<Lease> {
+    /// Returns the lease and verification suggestions (if any)
+    pub fn generate_lease(&self, index: Index) -> PlanResponse<(Lease, Vec<String>)> {
         self.with_context(|context| context.generate_lease(index))
     }
 
@@ -1495,7 +1528,7 @@ mod tests {
 
         // Generate a lease FOR THE CURRENT TASK (after moving)
         let lease_response = core.generate_lease(task_index.clone());
-        let generated_lease = lease_response.inner().value(); // Use .value()
+        let generated_lease = lease_response.inner().0.value(); // Access the Lease (index 0) in the tuple
 
         // --- Test Completion --- //
 
@@ -1553,7 +1586,7 @@ mod tests {
         core.move_to(task2_index.clone());
 
         let lease2_response = core.generate_lease(task2_index.clone());
-        let _generated_lease2 = lease2_response.inner().value(); // Use .value()
+        let _generated_lease2 = lease2_response.inner().0.value(); // Access the Lease (index 0) in the tuple
 
         // 4. Succeed completion with --force, even without lease (provide optional summary)
         let summary2 = "Forced completion summary".to_string();
@@ -1870,6 +1903,31 @@ mod tests {
         assert!(
             !context.get_task(idx_d.clone()).unwrap().is_completed(),
             "Task D should be initially incomplete"
+        );
+    }
+
+    #[test]
+    fn test_generate_lease_suggestions() {
+        let plan = Plan::new(default_levels());
+        let core = Core::new(Context::new(plan));
+
+        // 1. Test lease for ROOT task (index []) - should have suggestions
+        let root_lease_response = core.generate_lease(vec![]);
+        let (_root_lease, root_suggestions) = root_lease_response.inner();
+        assert!(
+            !root_suggestions.is_empty(),
+            "Suggestions should be present for root task lease"
+        );
+
+        // 2. Add a non-root task
+        let task1_index = core.add_task("Task 1".to_string(), 0).into_inner().1;
+
+        // 3. Test lease for NON-ROOT task - should NOT have suggestions
+        let task1_lease_response = core.generate_lease(task1_index);
+        let (_task1_lease, task1_suggestions) = task1_lease_response.inner();
+        assert!(
+            task1_suggestions.is_empty(),
+            "Suggestions should be empty for non-root task lease"
         );
     }
 }

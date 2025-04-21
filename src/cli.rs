@@ -248,13 +248,22 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
                     // Generate the lease
                     let response = client.generate_lease(parsed_index).await?;
 
-                    print_response(&response, |lease: &Lease| {
-                        println!(
-                            "Generated lease {} for task at index: {}",
-                            lease.value(),
-                            index
-                        );
-                    });
+                    // Unpack the response tuple
+                    let (lease, suggestions) = response.inner();
+
+                    println!(
+                        "Generated lease {} for task at index: {}",
+                        lease.value(),
+                        index
+                    );
+
+                    // Print suggestions if any
+                    if !suggestions.is_empty() {
+                        println!("\nVerification Suggestions:");
+                        for suggestion in suggestions {
+                            println!("- {}", suggestion);
+                        }
+                    }
                     Ok(())
                 }
 
