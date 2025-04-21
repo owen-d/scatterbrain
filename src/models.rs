@@ -62,6 +62,12 @@ impl Task {
         }
     }
 
+    /// Uncompletes the task and clears its completion summary.
+    pub(crate) fn uncomplete(&mut self) {
+        self.completed = false;
+        self.completion_summary = None;
+    }
+
     /// Sets the level index for this task
     pub(crate) fn set_level(&mut self, level_index: usize) {
         self.level_index = Some(level_index);
@@ -545,6 +551,51 @@ impl Context {
         }
     }
 
+    /// Uncompletes the task at the given index.
+    ///
+    /// # Arguments
+    ///
+    /// * `index` - The index of the task to uncomplete.
+    ///
+    /// # Returns
+    ///
+    /// A `PlanResponse` containing a `Result` which is `Ok(true)` on success,
+    /// or `Err(String)` if the task could not be found or uncompleted.
+    pub fn uncomplete_task(&mut self, index: Index) -> PlanResponse<Result<bool, String>> {
+        // Perform mutable operations first to resolve borrow conflicts
+        let uncomplete_result = match self.get_task_mut(index.clone()) {
+            None => Err("Task not found".to_string()),
+            Some(task) => {
+                let task_description = task.description().to_string(); // Capture before potential error
+                if !task.is_completed() {
+                    Err("Task is already incomplete".to_string())
+                } else {
+                    task.uncomplete();
+                    let index_str = index
+                        .iter()
+                        .map(|i| i.to_string())
+                        .collect::<Vec<_>>()
+                        .join(".");
+                    // Log transition *after* task modification but before getting distilled context
+                    self.log_transition(
+                        "Uncomplete Task".to_string(),
+                        Some(format!(
+                            "Uncompleted task \"{}\" at index {}",
+                            task_description, index_str
+                        )),
+                    );
+                    Ok(true)
+                }
+            }
+        };
+
+        // Now get the distilled context (immutable borrow)
+        let distilled = self.distilled_context().context();
+
+        // Construct the final response
+        PlanResponse::new(uncomplete_result, distilled)
+    }
+
     // Information retrieval
     /// Gets the task at the given index
     fn get_task(&self, index: Index) -> Option<&Task> {
@@ -1006,6 +1057,13 @@ impl Core {
     /// Removes the task at the given index
     pub fn remove_task(&self, index: Index) -> PlanResponse<Result<Task, String>> {
         self.with_context(|context| context.remove_task(index))
+    }
+
+    /// Uncompletes the task at the given index.
+    pub fn uncomplete_task(&self, index: Index) -> PlanResponse<Result<bool, String>> {
+        // Pass a closure to with_context that calls context.uncomplete_task.
+        // The with_context helper automatically wraps the returned PlanResponse.
+        self.with_context(|context| context.uncomplete_task(index))
     }
 
     // Subscribe to state updates
@@ -1648,5 +1706,84 @@ mod tests {
             .err()
             .unwrap()
             .contains("Child index 5 out of bounds"));
+    }
+
+    #[test]
+    fn test_task_uncompletion() {
+        let plan = Plan::new(default_levels());
+        let mut context = Context::new(plan);
+
+        // Add a task
+        let task_index = context
+            .add_task("Task to Uncomplete".to_string(), 0)
+            .into_inner()
+            .1;
+        let task_idx_clone = task_index.clone(); // Clone for later use
+
+        // Complete the task with a summary
+        let summary = "Task done".to_string();
+        let complete_res =
+            context.complete_task(task_index.clone(), None, false, Some(summary.clone()));
+        assert!(complete_res.inner().is_ok());
+        assert!(*complete_res.inner().as_ref().unwrap());
+
+        // Verify it's completed and has the summary
+        let task = context.get_task(task_index.clone()).unwrap();
+        assert!(task.is_completed());
+        assert_eq!(task.completion_summary(), Some(&summary));
+
+        // Uncomplete the task
+        let uncomplete_res = context.uncomplete_task(task_index.clone());
+        assert!(
+            uncomplete_res.inner().is_ok(),
+            "Uncompletion should succeed"
+        );
+        assert!(
+            *uncomplete_res.inner().as_ref().unwrap(),
+            "Uncompletion result should be true"
+        );
+
+        // Verify it's no longer completed and summary is cleared
+        let task = context.get_task(task_index.clone()).unwrap();
+        assert!(
+            !task.is_completed(),
+            "Task should be incomplete after uncompleting"
+        );
+        assert!(
+            task.completion_summary().is_none(),
+            "Summary should be cleared after uncompleting"
+        );
+
+        // Try uncompleting the already incomplete task
+        let uncomplete_again_res = context.uncomplete_task(task_index.clone());
+        assert!(
+            uncomplete_again_res.inner().is_err(),
+            "Uncompleting an incomplete task should fail"
+        );
+        assert!(uncomplete_again_res
+            .inner()
+            .as_ref()
+            .err()
+            .unwrap()
+            .contains("already incomplete"));
+
+        // Try uncompleting a non-existent task
+        let non_existent_index = vec![99];
+        let uncomplete_non_existent_res = context.uncomplete_task(non_existent_index);
+        assert!(
+            uncomplete_non_existent_res.inner().is_err(),
+            "Uncompleting non-existent task should fail"
+        );
+        assert!(uncomplete_non_existent_res
+            .inner()
+            .as_ref()
+            .err()
+            .unwrap()
+            .contains("not found"));
+
+        // Verify the original task state hasn't changed unexpectedly
+        let task_final_check = context.get_task(task_idx_clone).unwrap();
+        assert!(!task_final_check.is_completed());
+        assert!(task_final_check.completion_summary().is_none());
     }
 }

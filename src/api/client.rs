@@ -13,6 +13,7 @@ use crate::models::Index;
 // Import the request structs from the server module
 use super::server::{
     AddTaskRequest, ChangeLevelRequest, CompleteTaskRequest, LeaseRequest, MoveToRequest,
+    UncompleteTaskRequest,
 };
 
 /// API client configuration
@@ -370,6 +371,16 @@ impl Client {
 
         // Use the generic request helper method
         self.request(Method::DELETE, &url, None::<()>).await
+    }
+
+    /// Uncompletes a task by its index
+    pub async fn uncomplete_task(
+        &self,
+        index: Index,
+    ) -> Result<models::PlanResponse<Result<bool, String>>, ClientError> {
+        let url = format!("{}/api/task/uncomplete", self.config.base_url);
+        let request = UncompleteTaskRequest { index };
+        self.request(Method::POST, &url, Some(request)).await
     }
 
     /// Generic request helper

@@ -58,6 +58,12 @@ pub struct LeaseRequest {
     pub index: Index,
 }
 
+/// Request to uncomplete a task
+#[derive(Serialize, Deserialize)]
+pub struct UncompleteTaskRequest {
+    pub index: Index,
+}
+
 /// Server configuration
 #[derive(Clone, Debug)]
 pub struct ServerConfig {
@@ -122,6 +128,7 @@ pub async fn serve(core: Core, config: ServerConfig) -> Result<(), Box<dyn std::
         .route("/api/task/complete", post(complete_task))
         .route("/api/task/level", post(change_level))
         .route("/api/task/lease", post(generate_lease))
+        .route("/api/task/uncomplete", post(uncomplete_task))
         .route("/api/move", post(move_to))
         .route("/api/tasks/*index", delete(remove_task_handler))
         .route("/ui", get(ui_handler))
@@ -189,6 +196,24 @@ async fn generate_lease(
 ) -> JSONResp<models::Lease> {
     let response = core.generate_lease(payload.index);
     Json(ApiResponse::success(response))
+}
+
+async fn uncomplete_task(
+    State(core): State<Core>,
+    Json(payload): Json<UncompleteTaskRequest>,
+) -> JSONResp<Result<bool, String>> {
+    let response = core.uncomplete_task(payload.index);
+    // Handle the Result inside the PlanResponse
+    match response.inner() {
+        Ok(true) => Json(ApiResponse::success(response)),
+        Ok(false) => Json(ApiResponse::error(
+            "Task was already incomplete or uncompletion failed silently".to_string(),
+        )), // Should ideally not happen with current logic
+        Err(e) => {
+            // Return the error message wrapped in the expected JSON response structure
+            Json(ApiResponse::error(e.clone()))
+        }
+    }
 }
 
 async fn move_to(

@@ -120,6 +120,12 @@ enum TaskCommands {
         /// Task index (e.g., 0 or 0,1,2 for nested tasks)
         index: String,
     },
+
+    /// Uncomplete a task by its index
+    Uncomplete {
+        /// Task index (e.g., 0 or 0,1,2 for nested tasks)
+        index: String,
+    },
 }
 
 /// Run the CLI application
@@ -277,6 +283,50 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
                             eprintln!("Error removing task: {}", e);
                             // Consider printing distilled context even on error?
                             // For now, just print the error.
+                        }
+                    };
+                    Ok(())
+                }
+
+                TaskCommands::Uncomplete { index } => {
+                    // Parse the index string
+                    let parsed_index = match parse_index(index) {
+                        Ok(idx) => idx,
+                        Err(e) => {
+                            eprintln!("Error parsing index: {}", e);
+                            return Err(e.into()); // Exit if index is invalid
+                        }
+                    };
+
+                    // Call the client method to uncomplete the task
+                    match client.uncomplete_task(parsed_index).await {
+                        Ok(response) => {
+                            print_response(
+                                &response,
+                                |result: &Result<bool, String>| match result {
+                                    Ok(true) => {
+                                        println!("Uncompleted task at index: {}", index);
+                                    }
+                                    Ok(false) => {
+                                        // This case shouldn't technically happen based on current core logic
+                                        println!(
+                                        "Task at index {} was already incomplete or uncompletion failed.",
+                                        index
+                                    );
+                                    }
+                                    Err(e) => {
+                                        // Error messages from core are printed here
+                                        eprintln!(
+                                            "Failed to uncomplete task at index {}: {}",
+                                            index, e
+                                        );
+                                    }
+                                },
+                            );
+                        }
+                        Err(e) => {
+                            eprintln!("Error uncompleting task: {}", e);
+                            // Handle client-level errors (e.g., connection issues)
                         }
                     };
                     Ok(())
@@ -616,6 +666,7 @@ TASK MANAGEMENT:
   $ scatterbrain task change-level <LEVEL_INDEX>               Change current task's abstraction level
   $ scatterbrain task lease <INDEX>                            Generate a lease for a task
   $ scatterbrain task remove <INDEX>                           Remove a task by its index (e.g., 0,1,2)
+  $ scatterbrain task uncomplete <INDEX>                       Uncomplete a task by its index
   
 NAVIGATION:
   $ scatterbrain move <INDEX>                                  Navigate to a task (e.g., 0 or 0,1,2)
