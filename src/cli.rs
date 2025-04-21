@@ -661,6 +661,7 @@ MOVING UP:
 
 TASK MANAGEMENT:
   $ scatterbrain task add --level <LEVEL> "Task description"    Create new task (level is required)
+                                                                Note: Adding a subtask will mark its parent(s) as incomplete.
   $ scatterbrain task complete [--lease <ID>] [--force] [--summary <TEXT>] Complete current task (summary required unless --force)
   $ scatterbrain task complete --index <INDEX> [--lease <ID>] [--force] [--summary <TEXT>] Complete task at specified index
   $ scatterbrain task change-level <LEVEL_INDEX>               Change current task's abstraction level

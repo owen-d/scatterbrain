@@ -285,18 +285,47 @@ impl Context {
             // Adding to root task, special case
             self.plan.root_mut().add_subtask(task);
             new_index = vec![self.plan.root().subtasks().len() - 1];
+            // No parents to uncomplete when adding to root
         } else {
-            // Navigate to the current task
-            let current = self.get_current_task_mut().unwrap();
+            // Navigate to the current task (the parent of the new task)
+            let parent_index = self.cursor.clone();
+            let current = self.get_task_mut(parent_index.clone()).unwrap(); // Assume parent exists if cursor is not empty
 
             // Add the new task
             current.add_subtask(task);
             let task_index = current.subtasks().len() - 1;
 
-            // Create the new index
-            let mut task_index_vec = self.cursor.clone();
+            // Create the new index for the added task
+            let mut task_index_vec = parent_index.clone();
             task_index_vec.push(task_index);
             new_index = task_index_vec;
+
+            // Uncomplete parent tasks
+            let mut ancestor_index = parent_index;
+            while !ancestor_index.is_empty() {
+                if let Some(ancestor_task) = self.get_task_mut(ancestor_index.clone()) {
+                    ancestor_task.uncomplete();
+                    self.log_transition(
+                        "uncomplete_parent".to_string(),
+                        Some(format!(
+                            "Uncompleted parent task at index: {:?}",
+                            ancestor_index
+                        )),
+                    );
+                } else {
+                    // Should not happen if indices are correct, but log defensively
+                    self.log_transition(
+                        "uncomplete_parent_failed".to_string(),
+                        Some(format!(
+                            "Failed to find ancestor task at index: {:?}",
+                            ancestor_index
+                        )),
+                    );
+                    break; // Stop if an ancestor is missing
+                }
+                // Move up to the next ancestor
+                ancestor_index.pop();
+            }
         }
 
         PlanResponse::new((task_clone, new_index), self.distilled_context().context())
@@ -1349,32 +1378,36 @@ mod tests {
         let subtask_index = context.add_task("Subtask 1".to_string(), 1).into_inner().1;
         let history_len_after_add2 = context.history.len();
         assert_eq!(
-            history_len_after_add2, 3,
-            "History should have 3 entries after second add"
+            history_len_after_add2,
+            4, // Adjusted: add_task + uncomplete_parent
+            "History should have 4 entries after second add (incl. uncomplete)"
         );
-        assert_eq!(context.history.back().unwrap().action, "add_task");
+        assert_eq!(context.history.back().unwrap().action, "uncomplete_parent"); // Last action is uncomplete
 
         context.complete_task(subtask_index, None, false, Some("Test summary".to_string())); // Provide summary
         let history_len_after_complete = context.history.len();
         assert_eq!(
-            history_len_after_complete, 4,
-            "History should have 4 entries after complete"
+            history_len_after_complete,
+            5, // Adjusted: 4 + 1
+            "History should have 5 entries after complete"
         );
         assert_eq!(context.history.back().unwrap().action, "complete_task"); // Expect success
 
         context.change_level(task1_index, 0);
         let history_len_after_change_level = context.history.len();
         assert_eq!(
-            history_len_after_change_level, 5,
-            "History should have 5 entries after change_level"
+            history_len_after_change_level,
+            6, // Adjusted: 5 + 1
+            "History should have 6 entries after change_level"
         );
         assert_eq!(context.history.back().unwrap().action, "change_level");
 
         context.set_current_level(0);
         let history_len_after_set_level = context.history.len();
         assert_eq!(
-            history_len_after_set_level, 6,
-            "History should have 6 entries after set_current_level"
+            history_len_after_set_level,
+            7, // Adjusted: 6 + 1
+            "History should have 7 entries after set_current_level"
         );
         assert_eq!(context.history.back().unwrap().action, "set_current_level");
 
@@ -1785,5 +1818,58 @@ mod tests {
         let task_final_check = context.get_task(task_idx_clone).unwrap();
         assert!(!task_final_check.is_completed());
         assert!(task_final_check.completion_summary().is_none());
+    }
+
+    #[test]
+    fn test_add_task_uncompletes_parents() {
+        let plan = Plan::new(default_levels());
+        let mut context = Context::new(plan);
+
+        // Add Task A
+        let idx_a = context.add_task("Task A".to_string(), 0).into_inner().1;
+        context.move_to(idx_a.clone());
+
+        // Add Task B under A
+        let idx_b = context.add_task("Task B".to_string(), 1).into_inner().1;
+        context.move_to(idx_b.clone());
+
+        // Add Task C under B
+        let idx_c = context.add_task("Task C".to_string(), 2).into_inner().1;
+
+        // Complete Task A (should complete A, B, C)
+        let complete_res =
+            context.complete_task(idx_a.clone(), None, false, Some("Done A".to_string()));
+        assert!(complete_res.inner().is_ok() && *complete_res.inner().as_ref().unwrap());
+
+        // Verify A, B, C are completed
+        assert!(context.get_task(idx_a.clone()).unwrap().is_completed());
+        assert!(context.get_task(idx_b.clone()).unwrap().is_completed());
+        assert!(context.get_task(idx_c.clone()).unwrap().is_completed());
+
+        // Move to Task C
+        context.move_to(idx_c.clone());
+
+        // Add Task D under C
+        let idx_d = context.add_task("Task D".to_string(), 3).into_inner().1;
+
+        // Verify A, B, C are now INCOMPLETE
+        assert!(
+            !context.get_task(idx_a.clone()).unwrap().is_completed(),
+            "Task A should be incomplete after adding D"
+        );
+        assert!(
+            !context.get_task(idx_b.clone()).unwrap().is_completed(),
+            "Task B should be incomplete after adding D"
+        );
+        assert!(
+            !context.get_task(idx_c.clone()).unwrap().is_completed(),
+            "Task C should be incomplete after adding D"
+        );
+
+        // Verify D is incomplete
+        assert!(
+            !context.get_task(idx_d.clone()).unwrap().is_completed(),
+            "Task D should be initially incomplete"
+        );
     }
 }
