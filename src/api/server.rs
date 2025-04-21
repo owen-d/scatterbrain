@@ -552,10 +552,7 @@ fn render_tasks_html(
         // Add completion summary if available
         if task.is_completed() {
             if let Some(summary) = task.completion_summary() {
-                html.push_str(&format!(
-                    "<span class='task-summary'>Summary: {}</span>",
-                    summary
-                ));
+                html.push_str(&format!("<span class='task-summary'>{}</span>", summary));
             }
         }
 
