@@ -135,14 +135,17 @@ impl TransitionLogEntry {
 pub struct Plan {
     root: Task,
     levels: Vec<Level>,
+    /// The original prompt or high-level goal for this plan.
+    goal: Option<String>,
 }
 
 impl Plan {
-    /// Creates a new plan with the given levels
-    pub fn new(levels: Vec<Level>) -> Self {
+    /// Creates a new plan with the given levels and an optional goal
+    pub fn new(levels: Vec<Level>, goal: Option<String>) -> Self {
         Self {
             root: Task::new("root".to_string()),
             levels,
+            goal,
         }
     }
 
@@ -261,9 +264,8 @@ impl Context {
         }
     }
 
-    /// Creates a default context with default levels and a seed RNG
-    pub fn default_with_seed(seed: u64) -> Self {
-        let plan = Plan::new(default_levels());
+    /// Creates a new context with the given plan and a specific seed
+    pub fn new_with_seed(plan: Plan, seed: u64) -> Self {
         Self {
             plan,
             cursor: Vec::new(),
@@ -271,6 +273,12 @@ impl Context {
             leases: HashMap::new(),
             rng: StdRng::seed_from_u64(seed),
         }
+    }
+
+    /// Creates a default context with default levels and a seed RNG
+    pub fn default_with_seed(seed: u64) -> Self {
+        let plan = Plan::new(default_levels(), None); // Pass None for goal here
+        Self::new_with_seed(plan, seed)
     }
 
     /// Logs a state transition, maintaining the history buffer size.
@@ -1113,9 +1121,9 @@ impl Core {
         Ok(result)
     }
 
-    /// Creates a new plan with default settings and returns its unique ID (Lease).
+    /// Creates a new plan with the given goal and returns its unique ID (Lease).
     /// Handles potential collisions if a randomly generated u8 ID already exists.
-    pub fn create_plan(&self) -> Result<PlanId, PlanError> {
+    pub fn create_plan(&self, goal: Option<String>) -> Result<PlanId, PlanError> {
         let mut plans = self.inner.write().map_err(|_| PlanError::LockError)?;
 
         let mut new_id_val;
@@ -1127,12 +1135,13 @@ impl Core {
                 break;
             }
             // ID collision, loop again to generate a new one
-            // Consider adding a retry limit or warning if collisions become frequent (unlikely for u8)
         }
 
         let new_id = Lease(new_id_val);
-        // Use a random seed for new plans
-        let new_context = Context::default_with_seed(rand::random());
+        // Create a new plan with the provided goal
+        let plan = Plan::new(default_levels(), goal);
+        // Use a random seed for new plans, creating context directly with seed
+        let new_context = Context::new_with_seed(plan, rand::random());
         plans.insert(new_id, new_context);
 
         // Notify about the creation
@@ -1310,7 +1319,7 @@ mod tests {
         let core = setup_core();
 
         // Create a new plan - check it's not the default ID
-        let id1 = core.create_plan().expect("Failed to create plan 1");
+        let id1 = core.create_plan(None).expect("Failed to create plan 1");
         assert_ne!(id1, default_token(), "New ID should not be the default");
 
         // Verify it exists
@@ -1321,7 +1330,7 @@ mod tests {
         } // Read lock released
 
         // Create another plan
-        let id2 = core.create_plan().expect("Failed to create plan 2");
+        let id2 = core.create_plan(None).expect("Failed to create plan 2");
         assert_ne!(id2, default_token());
         assert_ne!(id2, id1);
 
@@ -1380,8 +1389,8 @@ mod tests {
         assert_eq!(initial_ids.len(), 1);
         assert!(initial_ids.contains(&default_token())); // Use helper
 
-        let id1 = core.create_plan().unwrap();
-        let id2 = core.create_plan().unwrap();
+        let id1 = core.create_plan(None).unwrap();
+        let id2 = core.create_plan(None).unwrap();
 
         let current_ids = core.list_plans().unwrap();
         assert_eq!(current_ids.len(), 3);
@@ -1395,6 +1404,30 @@ mod tests {
         assert!(after_delete_ids.contains(&default_token())); // Use helper
         assert!(after_delete_ids.contains(&id2));
         assert!(!after_delete_ids.contains(&id1));
+    }
+
+    #[test]
+    fn test_create_plan_with_goal() {
+        let core = setup_core();
+        let goal = "Test goal for the plan".to_string();
+        let id = core
+            .create_plan(Some(goal.clone()))
+            .expect("Failed to create plan with goal");
+
+        // Verify the goal is stored
+        let plan_response = core.get_plan(&id).expect("Failed to get created plan");
+        let plan = plan_response.inner();
+        assert_eq!(plan.goal, Some(goal));
+
+        // Verify creating a plan without a goal still works
+        let id_no_goal = core
+            .create_plan(None)
+            .expect("Failed to create plan without goal");
+        let plan_response_no_goal = core
+            .get_plan(&id_no_goal)
+            .expect("Failed to get plan without goal");
+        let plan_no_goal = plan_response_no_goal.inner();
+        assert_eq!(plan_no_goal.goal, None);
     }
 
     // Example modification for one test:
@@ -1451,7 +1484,7 @@ mod tests {
         assert_eq!(*current_index_resp.inner(), vec![0, 0]);
 
         // Test with a second plan
-        let id2 = core.create_plan().unwrap();
+        let id2 = core.create_plan(None).unwrap();
         let response2 = core
             .add_task(&id2, "Task A Plan 2".to_string(), 0)
             .expect("Failed to add task to plan 2");

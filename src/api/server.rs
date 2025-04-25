@@ -64,6 +64,12 @@ pub struct UncompleteTaskRequest {
     pub index: Index,
 }
 
+/// Request to create a new plan with an optional prompt
+#[derive(Serialize, Deserialize, Default)] // Add Default for optional body
+pub struct CreatePlanRequest {
+    pub prompt: Option<String>,
+}
+
 /// Server configuration
 #[derive(Clone, Debug)]
 pub struct ServerConfig {
@@ -252,8 +258,16 @@ async fn list_plans_ui_handler(State(core): State<Core>) -> impl IntoResponse {
     }
 }
 
-async fn create_plan_handler(State(core): State<Core>) -> impl IntoResponse {
-    let result = core.create_plan();
+async fn create_plan_handler(
+    State(core): State<Core>,
+    // Use optional Json extractor for the request body
+    payload: Option<Json<CreatePlanRequest>>,
+) -> impl IntoResponse {
+    // Extract the prompt, defaulting to None if payload is missing or malformed
+    let prompt = payload.and_then(|json_payload| json_payload.0.prompt);
+
+    // Call core.create_plan with the prompt
+    let result = core.create_plan(prompt);
     map_core_result_simple(result) // Returns Lease (PlanId)
 }
 

@@ -12,8 +12,8 @@ use crate::models::{self, Index};
 
 // Import the request structs from the server module
 use super::server::{
-    AddTaskRequest, ChangeLevelRequest, CompleteTaskRequest, LeaseRequest, MoveToRequest,
-    UncompleteTaskRequest,
+    AddTaskRequest, ChangeLevelRequest, CompleteTaskRequest, CreatePlanRequest, LeaseRequest,
+    MoveToRequest, UncompleteTaskRequest,
 };
 
 /// API client configuration
@@ -256,8 +256,9 @@ impl Client {
     }
 
     /// Plan Management Methods
-    pub async fn create_plan(&self) -> Result<models::Lease, ClientError> {
-        self.request(Method::POST, "/api/plans", None::<&()>).await
+    pub async fn create_plan(&self, prompt: Option<String>) -> Result<models::Lease, ClientError> {
+        let body = CreatePlanRequest { prompt };
+        self.request(Method::POST, "/api/plans", Some(&body)).await
     }
 
     pub async fn delete_plan(&self, id: u8) -> Result<(), ClientError> {
