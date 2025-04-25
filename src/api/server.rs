@@ -14,7 +14,6 @@ use axum::{
     routing::{delete, get, post},
     Json, Router,
 };
-use futures::Future;
 use futures::Stream;
 use serde::{Deserialize, Serialize};
 use tokio::net::TcpListener;
@@ -468,7 +467,20 @@ async fn events_handler(
     let plan_id = models::Lease::new(id); // Use constructor
     let stream = EventStream::new(core.clone(), receiver, plan_id);
 
-    axum::response::sse::Sse::new(stream).keep_alive(axum::response::sse::KeepAlive::default())
+    // Set headers for event stream
+    let headers = [
+        (
+            axum::http::header::CONTENT_TYPE,
+            axum::http::HeaderValue::from_static("text/event-stream"),
+        ),
+        (
+            axum::http::header::CACHE_CONTROL,
+            axum::http::HeaderValue::from_static("no-cache"),
+        ),
+    ];
+
+    // Return response with headers and stream body
+    (headers, axum::body::Body::from_stream(stream))
 }
 
 struct EventStream {
@@ -493,69 +505,40 @@ impl EventStream {
 }
 
 impl Stream for EventStream {
-    type Item = Result<axum::response::sse::Event, Infallible>;
+    type Item = Result<String, Infallible>;
 
-    fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
-        // Use recv() in a polled future
-        // Resubscribe to get a new receiver handle that can be moved.
-        let mut receiver = self.receiver.resubscribe();
-        let core = self.core.clone(); // Clone core for async block
-                                      // Clone the specific plan_id for the async block
-        let stream_plan_id = self.plan_id; // Lease is Copy, no clone needed
-
-        let mut fut = Box::pin(async move {
-            // Loop until we get a relevant id update or error
-            loop {
-                match receiver.recv().await {
-                    Ok(updated_id) => {
-                        // Only process if the update is for this stream's specific id
-                        if updated_id == stream_plan_id {
-                            // An update occurred for the relevant plan `id`
-                            match core.distilled_context(&updated_id) {
-                                Ok(response) => {
-                                    let json_data = serde_json::to_string(&response.context())
-                                        .unwrap_or_default();
-                                    let event: axum::response::sse::Event =
-                                        axum::response::sse::Event::default()
-                                            .event("update")
-                                            .data(json_data);
-                                    // Break loop and return the event
-                                    break Some(Ok(event));
-                                }
-                                Err(e) => {
-                                    eprintln!(
-                                        // Use Debug formatting for PlanId (Lease)
-                                        "Error fetching context for event stream (id {:?}): {}",
-                                        updated_id, e
-                                    );
-                                    // Decide how to handle error, maybe return None or skip
-                                    // Break loop and signal error/end?
-                                    break None;
-                                }
-                            }
-                        }
-                        // If id doesn't match, continue loop to wait for next message
-                    }
-                    Err(tokio::sync::broadcast::error::RecvError::Lagged(n)) => {
-                        eprintln!(
-                            // Use Debug formatting for PlanId (Lease)
-                            "SSE stream for {:?} lagged by {} messages",
-                            stream_plan_id, n
-                        );
-                        // Decide how to handle lag, maybe return None or special event
-                        // Break loop and signal error/end?
-                        break None;
-                    }
-                    Err(tokio::sync::broadcast::error::RecvError::Closed) => {
-                        // Break loop and signal stream end
-                        break None;
-                    }
+    fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
+        // Try to receive from the broadcast channel with a non-blocking approach
+        match self.receiver.try_recv() {
+            Ok(id) => {
+                if id == self.plan_id {
+                    // Successfully received an update notification, send event to client
+                    Poll::Ready(Some(Ok("event: update\ndata: change\n\n".to_string())))
+                } else {
+                    Poll::Pending
                 }
             }
-        });
-
-        // Poll the future we created, ensuring Future trait is in scope
-        fut.as_mut().poll(cx)
+            Err(tokio::sync::broadcast::error::TryRecvError::Empty) => {
+                // No updates available now, register the waker to be notified later
+                // Create a task to wake this future when the receiver might have data
+                let waker = cx.waker().clone();
+                tokio::spawn(async move {
+                    tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+                    waker.wake();
+                });
+                Poll::Pending
+            }
+            Err(tokio::sync::broadcast::error::TryRecvError::Lagged(_)) => {
+                // Some messages were missed, but that's okay
+                // Just notify the client that there was a change
+                Poll::Ready(Some(Ok("event: update\ndata: change\n\n".to_string())))
+            }
+            Err(tokio::sync::broadcast::error::TryRecvError::Closed) => {
+                // Channel closed, try to resubscribe
+                self.receiver = self.core.subscribe();
+                Poll::Pending
+            }
+        }
     }
 }
 
