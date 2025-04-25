@@ -172,7 +172,7 @@ pub async fn serve(core: Core, config: ServerConfig) -> Result<(), Box<dyn std::
     // Build application with routes
     let app = Router::new()
         // --- Redirect root to the new plan listing UI --- //
-        .route("/", get(|| async { Redirect::permanent("/ui") })) // Redirect to /ui
+        .route("/", get(|| async { Redirect::temporary("/ui") })) // Redirect to /ui
         // --- Plan Management --- //
         .route(
             "/api/plans",

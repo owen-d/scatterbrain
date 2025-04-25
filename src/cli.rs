@@ -18,16 +18,16 @@ const PLAN_ID_ENV_VAR: &str = "SCATTERBRAIN_PLAN_ID";
 #[derive(Parser)]
 #[command(author, version, about, long_about = None)]
 pub struct Cli {
-    #[command(subcommand)]
-    command: Commands,
-
     /// API server URL
-    #[arg(short, long, default_value = "http://localhost:3000")]
+    #[arg(short, long, global = true, default_value = "http://localhost:3000")]
     server: String,
 
     /// Target plan ID (overrides SCATTERBRAIN_PLAN_ID env var)
-    #[arg(long)]
+    #[arg(long, global = true)]
     plan: Option<u8>,
+
+    #[command(subcommand)]
+    command: Commands,
 }
 
 #[derive(Subcommand)]
@@ -90,9 +90,9 @@ enum TaskCommands {
 
     /// Complete the current task or the task at the specified index
     Complete {
-        /// Optional task index (e.g., 0 or 0,1,2 for nested tasks). If omitted, completes the current task.
+        /// Task index (e.g., 0 or 0,1,2 for nested tasks)
         #[arg(short, long)]
-        index: Option<String>,
+        index: String,
 
         /// The lease required to complete the task
         #[arg(long)]
@@ -204,41 +204,17 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
                 }
 
                 TaskCommands::Complete {
-                    index: index_str_opt,
+                    index,
                     lease,
                     force,
                     summary,
                 } => {
                     // Determine the target index
-                    let target_index = if let Some(index_str) = index_str_opt {
-                        match parse_index(index_str) {
-                            Ok(idx) => idx,
-                            Err(e) => {
-                                eprintln!("Error parsing index: {}", e);
-                                return Err(e.into());
-                            }
-                        }
-                    } else {
-                        // Get the current index for the *active* plan (id is PlanId)
-                        // Pass id.value() to get_current
-                        match client.get_current(id.value()).await {
-                            Ok(current_response) => current_response.inner().as_ref().map_or_else(
-                                || {
-                                    eprintln!("Error: Cannot complete current task - no task is currently selected in plan {}.", id.value()); // Use id.value() for display
-                                    Err(Box::<dyn std::error::Error>::from(
-                                        "No current task selected",
-                                    ))
-                                },
-                                |current| Ok(current.index.clone()),
-                            )?,
-                            Err(e) => {
-                                eprintln!(
-                                    "Error fetching current task index for plan {}: {}",
-                                    id.value(),
-                                    e
-                                ); // Use id.value() for display
-                                return Err(e.into());
-                            }
+                    let target_index = match parse_index(index) {
+                        Ok(idx) => idx,
+                        Err(e) => {
+                            eprintln!("Error parsing index: {}", e);
+                            return Err(e.into());
                         }
                     };
 
@@ -616,13 +592,13 @@ Scatterbrain organizes work into separate "plans". Each command needs to know wh
 1. CREATE A PLAN:
    $ scatterbrain plan create
    > Created new plan with ID: 42
-   > Set the environment variable: export SCATTERBRAIN_PLAN_ID=42
+   > Set the environment variable: export {}={}
 
 2. SPECIFY THE ACTIVE PLAN:
    You MUST tell scatterbrain which plan to use in one of two ways:
    
    a) ENVIRONMENT VARIABLE (Recommended for sessions):
-      $ export SCATTERBRAIN_PLAN_ID=42
+      $ export {}={}
       $ scatterbrain current  # Now works with plan 42
 
    b) --plan FLAG (Overrides env var for a single command):
@@ -694,7 +670,7 @@ MOVING UP:
 
 == WORKFLOW GUIDE ==
 
-(Ensure SCATTERBRAIN_PLAN_ID is set or use --plan=<id> for each command)
+(Ensure {}={} is set or use --plan=<id> for each command)
 
 1. CREATE A PLAN AND NAVIGATE THE LEVELS
    - Begin at Level 0 with high-level planning:
@@ -758,8 +734,7 @@ PLAN MANAGEMENT (scatterbrain plan ...):
 TASK MANAGEMENT (scatterbrain task ...):
   $ scatterbrain task add --level <LEVEL> "Description"  Create new task (level required)
                                                          Note: Adding a subtask marks parents incomplete.
-  $ scatterbrain task complete [--lease <ID>] [--force] [--summary <TEXT>] Complete current task (summary required unless --force)
-  $ scatterbrain task complete --index <INDEX> [...]     Complete task at specified index
+  $ scatterbrain task complete --index <INDEX> [--lease <ID>] [--force] [--summary <TEXT>] Complete task at specified index (summary required unless --force)
   $ scatterbrain task change-level <LEVEL_INDEX>         Change current task's abstraction level
   $ scatterbrain task lease <INDEX>                      Generate a lease for a task
   $ scatterbrain task remove <INDEX>                     Remove a task by its index (e.g., 0,1,2)
@@ -783,7 +758,7 @@ HELP & UTILITIES (scatterbrain ...):
 == BEST PRACTICES ==
 
 PLAN MANAGEMENT:
-  • Use `export SCATTERBRAIN_PLAN_ID=<id>` for most work within a shell session.
+  • Use `export {}=<id>` for most work within a shell session.
   • Use `--plan=<id>` for one-off commands targeting a different plan.
   • Regularly use `plan list` to see available plans.
 
@@ -800,7 +775,7 @@ LEVEL USAGE:
   • Use Level 3 for "how" questions
 
 COMMON MISTAKES TO AVOID:
-  • Forgetting to set SCATTERBRAIN_PLAN_ID or use --plan=<id>.
+  • Forgetting to set {}={} or use --plan=<id>.
   • Premature implementation detail: Diving into code specifics at Level 0
   • Inconsistent abstractions: Mixing high-level and low-level concerns
   • Abstraction resistance: Staying too high-level when details are needed
