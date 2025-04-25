@@ -2,13 +2,13 @@
 //!
 //! This module provides HTTP client functionality to interact with the scatterbrain API server.
 
-use std::sync::Arc;
+use reqwest::{
+    header::{HeaderMap, HeaderValue, CONTENT_TYPE},
+    Client as ReqwestClient, Error as ReqwestError, Method,
+};
+use serde::{de::DeserializeOwned, Deserialize, Serialize};
 
-use reqwest::{Client as ReqwestClient, Error as ReqwestError, Method};
-use serde::Deserialize;
-
-use crate::models;
-use crate::models::Index;
+use crate::models::{self, Index};
 
 // Import the request structs from the server module
 use super::server::{
@@ -41,20 +41,26 @@ struct ApiResponse<T> {
 /// Client errors
 #[derive(Debug, thiserror::Error)]
 pub enum ClientError {
-    #[error("HTTP error: {0}")]
-    Http(#[from] ReqwestError),
+    #[error("Request error: {0}")]
+    Request(#[from] ReqwestError),
 
     #[error("API error: {0}")]
     Api(String),
 
-    #[error("Missing data in response")]
-    MissingData,
+    #[error("Plan not found: ID {0:?}")]
+    PlanNotFound(models::PlanId),
+
+    #[error("Serialization error: {0}")]
+    Serialization(#[from] serde_json::Error),
+
+    #[error("Internal client error: {0}")]
+    Internal(String),
 }
 
 /// API client for the scatterbrain service
 #[derive(Debug, Clone)]
 pub struct Client {
-    http_client: Arc<ReqwestClient>,
+    http_client: ReqwestClient,
     config: ClientConfig,
 }
 
@@ -67,367 +73,200 @@ impl Client {
     /// Create a new client with custom configuration
     pub fn with_config(config: ClientConfig) -> Self {
         Self {
-            http_client: Arc::new(ReqwestClient::new()),
+            http_client: ReqwestClient::new(),
             config,
         }
     }
 
-    /// Get the full plan
-    pub async fn get_plan(&self) -> Result<models::PlanResponse<models::Plan>, ClientError> {
-        let url = format!("{}/api/plan", self.config.base_url);
-        let response = self.http_client.get(&url).send().await?;
-
-        if !response.status().is_success() {
-            return Err(ClientError::Api(format!(
-                "HTTP error: {}",
-                response.status()
-            )));
-        }
-
-        let api_response: ApiResponse<models::PlanResponse<models::Plan>> =
-            match response.json().await {
-                Ok(data) => data,
-                Err(e) => {
-                    // Get the text to debug error
-                    let err_text = format!("JSON parse error: {}. Check model compatibility.", e);
-                    return Err(ClientError::Api(err_text));
-                }
-            };
-
-        if api_response.success {
-            api_response.data.ok_or(ClientError::MissingData)
-        } else {
-            Err(ClientError::Api(
-                api_response
-                    .error
-                    .unwrap_or_else(|| "Unknown API error".to_string()),
-            ))
-        }
-    }
-
-    /// Get the current task
-    pub async fn get_current(
-        &self,
-    ) -> Result<models::PlanResponse<Option<models::Current>>, ClientError> {
-        let url = format!("{}/api/current", self.config.base_url);
-        let response = self.http_client.get(&url).send().await?;
-
-        if !response.status().is_success() {
-            return Err(ClientError::Api(format!(
-                "HTTP error: {}",
-                response.status()
-            )));
-        }
-
-        let api_response: ApiResponse<models::PlanResponse<Option<models::Current>>> =
-            response.json().await?;
-
-        if api_response.success {
-            match api_response.data {
-                Some(plan_response) => Ok(plan_response),
-                None => Err(ClientError::MissingData),
-            }
-        } else {
-            Err(ClientError::Api(
-                api_response
-                    .error
-                    .unwrap_or_else(|| "Unknown API error".to_string()),
-            ))
-        }
-    }
-
-    /// Get the distilled context
-    pub async fn get_distilled_context(&self) -> Result<models::PlanResponse<()>, ClientError> {
-        let url = format!("{}/api/distilled", self.config.base_url);
-        let response = self.http_client.get(&url).send().await?;
-
-        if !response.status().is_success() {
-            return Err(ClientError::Api(format!(
-                "HTTP error: {}",
-                response.status()
-            )));
-        }
-
-        let api_response: ApiResponse<models::PlanResponse<()>> = response.json().await?;
-
-        if api_response.success {
-            match api_response.data {
-                Some(plan_response) => Ok(plan_response),
-                None => Err(ClientError::MissingData),
-            }
-        } else {
-            Err(ClientError::Api(
-                api_response
-                    .error
-                    .unwrap_or_else(|| "Unknown API error".to_string()),
-            ))
-        }
-    }
-
-    /// Add a new task
-    pub async fn add_task(
-        &self,
-        description: String,
-        level_index: usize,
-    ) -> Result<models::PlanResponse<(models::Task, Index)>, ClientError> {
-        let url = format!("{}/api/task", self.config.base_url);
-        let request = AddTaskRequest {
-            description,
-            level_index,
-        };
-        let response = self.http_client.post(&url).json(&request).send().await?;
-
-        if !response.status().is_success() {
-            return Err(ClientError::Api(format!(
-                "HTTP error: {}",
-                response.status()
-            )));
-        }
-
-        let api_response: ApiResponse<models::PlanResponse<(models::Task, Index)>> =
-            response.json().await?;
-
-        if api_response.success {
-            match api_response.data {
-                Some(plan_response) => Ok(plan_response),
-                None => Err(ClientError::MissingData),
-            }
-        } else {
-            Err(ClientError::Api(
-                api_response
-                    .error
-                    .unwrap_or_else(|| "Unknown API error".to_string()),
-            ))
-        }
-    }
-
-    /// Complete the current task
-    pub async fn complete_task(
-        &self,
-        index: Index,
-        lease: Option<u8>,
-        force: bool,
-        summary: Option<String>,
-    ) -> Result<models::PlanResponse<bool>, ClientError> {
-        let url = format!("{}/api/task/complete", self.config.base_url);
-        let request = CompleteTaskRequest {
-            index,
-            lease,
-            force,
-            summary,
-        };
-        let response = self.http_client.post(&url).json(&request).send().await?;
-
-        if !response.status().is_success() {
-            return Err(ClientError::Api(format!(
-                "HTTP error: {}",
-                response.status()
-            )));
-        }
-
-        let api_response: ApiResponse<models::PlanResponse<bool>> = response.json().await?;
-
-        if api_response.success {
-            match api_response.data {
-                Some(plan_response) => Ok(plan_response),
-                None => Err(ClientError::MissingData),
-            }
-        } else {
-            Err(ClientError::Api(
-                api_response
-                    .error
-                    .unwrap_or_else(|| "Unknown API error".to_string()),
-            ))
-        }
-    }
-
-    /// Move to a specific task
-    pub async fn move_to(
-        &self,
-        index: Index,
-    ) -> Result<models::PlanResponse<Option<String>>, ClientError> {
-        let url = format!("{}/api/move", self.config.base_url);
-        let request = MoveToRequest { index };
-        let response = self.http_client.post(&url).json(&request).send().await?;
-
-        if response.status().is_success() {
-            let api_response: ApiResponse<models::PlanResponse<Option<String>>> =
-                response.json().await?;
-            if api_response.success {
-                match api_response.data {
-                    Some(plan_response) => Ok(plan_response),
-                    None => Err(ClientError::MissingData),
-                }
-            } else {
-                Err(ClientError::Api(
-                    api_response
-                        .error
-                        .unwrap_or_else(|| "Unknown API error".to_string()),
-                ))
-            }
-        } else {
-            let api_response: ApiResponse<()> = response.json().await?;
-            Err(ClientError::Api(
-                api_response
-                    .error
-                    .unwrap_or_else(|| "Unknown API error".to_string()),
-            ))
-        }
-    }
-
-    /// Change the abstraction level of a task
-    pub async fn change_level(
-        &self,
-        index: Index,
-        level_index: usize,
-    ) -> Result<models::PlanResponse<Result<(), String>>, ClientError> {
-        let url = format!("{}/api/task/level", self.config.base_url);
-        let request = ChangeLevelRequest { index, level_index };
-        let response = self.http_client.post(&url).json(&request).send().await?;
-
-        if response.status().is_success() {
-            let api_response: ApiResponse<models::PlanResponse<Result<(), String>>> =
-                response.json().await?;
-            if api_response.success {
-                match api_response.data {
-                    Some(plan_response) => Ok(plan_response),
-                    None => Err(ClientError::MissingData),
-                }
-            } else {
-                Err(ClientError::Api(
-                    api_response
-                        .error
-                        .unwrap_or_else(|| "Unknown API error".to_string()),
-                ))
-            }
-        } else {
-            let api_response: ApiResponse<()> = response.json().await?;
-            Err(ClientError::Api(
-                api_response
-                    .error
-                    .unwrap_or_else(|| "Unknown API error".to_string()),
-            ))
-        }
-    }
-
-    /// Generate a lease for a specific task
-    pub async fn generate_lease(
-        &self,
-        index: Index,
-    ) -> Result<models::PlanResponse<(models::Lease, Vec<String>)>, ClientError> {
-        let url = format!("{}/api/task/lease", self.config.base_url);
-
-        // Use the imported LeaseRequest struct
-        let request = LeaseRequest { index };
-
-        let response = self.http_client.post(&url).json(&request).send().await?;
-        let status = response.status(); // Read status before potentially consuming body
-
-        if status.is_success() {
-            let api_response: ApiResponse<models::PlanResponse<(models::Lease, Vec<String>)>> =
-                match response.json().await {
-                    Ok(data) => data,
-                    Err(e) => {
-                        return Err(ClientError::Api(format!(
-                            "Failed to parse success response: {}",
-                            e
-                        )))
-                    }
-                };
-            if api_response.success {
-                api_response.data.ok_or(ClientError::MissingData)
-            } else {
-                Err(ClientError::Api(
-                    api_response
-                        .error
-                        .unwrap_or_else(|| "Unknown API error".to_string()),
-                ))
-            }
-        } else {
-            let err_text = response
-                .text()
-                .await
-                .unwrap_or_else(|_| "Failed to read error body".to_string());
-            Err(ClientError::Api(format!(
-                "HTTP error: {}. Body: {}",
-                status, err_text
-            )))
-        }
-    }
-
-    /// Removes a task by its index
-    pub async fn remove_task(
-        &self,
-        index: Index,
-    ) -> Result<models::PlanResponse<models::Task>, ClientError> {
-        // Format the index vector into a comma-separated string
-        let index_str = index
-            .iter()
-            .map(|i| i.to_string())
-            .collect::<Vec<_>>()
-            .join(",");
-
-        let url = format!("{}/api/tasks/{}", self.config.base_url, index_str);
-
-        // Use the generic request helper method
-        self.request(Method::DELETE, &url, None::<()>).await
-    }
-
-    /// Uncompletes a task by its index
-    pub async fn uncomplete_task(
-        &self,
-        index: Index,
-    ) -> Result<models::PlanResponse<Result<bool, String>>, ClientError> {
-        let url = format!("{}/api/task/uncomplete", self.config.base_url);
-        let request = UncompleteTaskRequest { index };
-        self.request(Method::POST, &url, Some(request)).await
-    }
-
-    /// Generic request helper
-    async fn request<
-        T: for<'de> Deserialize<'de> + Send + 'static,
-        ReqBody: serde::Serialize + Send + Sync,
-    >(
+    /// Helper function to send requests
+    async fn request<T: DeserializeOwned, B: Serialize + ?Sized>(
         &self,
         method: Method,
-        url: &str,
-        body: Option<ReqBody>,
-    ) -> Result<models::PlanResponse<T>, ClientError> {
-        let mut request_builder = self.http_client.request(method, url);
-        if let Some(b) = body {
-            request_builder = request_builder.json(&b);
+        path: &str,
+        body: Option<&B>,
+    ) -> Result<T, ClientError> {
+        let url = format!("{}{}", self.config.base_url, path);
+        let mut headers = HeaderMap::new();
+        headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
+
+        let mut request_builder = self.http_client.request(method, &url).headers(headers);
+
+        if let Some(body_data) = body {
+            request_builder = request_builder.json(body_data);
         }
 
         let response = request_builder.send().await?;
         let status = response.status();
 
+        // Check if the status code indicates success
         if status.is_success() {
-            let api_response: ApiResponse<models::PlanResponse<T>> = match response.json().await {
-                Ok(data) => data,
-                Err(e) => {
-                    return Err(ClientError::Api(format!(
-                        "Failed to parse success response: {}",
-                        e
-                    )))
-                }
-            };
+            // Attempt to deserialize the successful response
+            let api_response: ApiResponse<T> = response.json().await?;
             if api_response.success {
-                api_response.data.ok_or(ClientError::MissingData)
+                api_response.data.ok_or_else(|| {
+                    ClientError::Internal("API reported success but sent no data".to_string())
+                })
             } else {
-                Err(ClientError::Api(api_response.error.unwrap_or_else(|| {
-                    "Unknown API error on failure".to_string()
-                })))
+                // Handle cases where API reports failure despite 2xx status (shouldn't happen ideally)
+                Err(ClientError::Api(
+                    api_response
+                        .error
+                        .unwrap_or_else(|| "Unknown API error".to_string()),
+                ))
             }
         } else {
-            let err_text = response
-                .text()
-                .await
-                .unwrap_or_else(|_| "Failed to read error body".to_string());
-            Err(ClientError::Api(format!(
-                "HTTP error: {}. Body: {}",
-                status, err_text
-            )))
+            // Attempt to deserialize the error response body
+            let error_response: Result<ApiResponse<()>, _> = response.json().await;
+            let error_message = error_response
+                .ok()
+                .and_then(|resp| resp.error)
+                .unwrap_or_else(|| format!("HTTP error: {}", status));
+
+            // Check for specific PlanNotFound error pattern if possible
+            if error_message.contains("Plan ID '") && error_message.contains("' not found") {
+                // Extract token (best effort) - Needs update for u8 ID
+                let id_str = error_message.split('\'').nth(1).unwrap_or(""); // Fallback
+                let id_val = id_str.parse::<u8>().unwrap_or(255); // Try parse, fallback
+                Err(ClientError::PlanNotFound(models::Lease::new(id_val)))
+            } else {
+                Err(ClientError::Api(error_message))
+            }
         }
+    }
+
+    /// Get the full plan
+    pub async fn get_plan(
+        &self,
+        id: u8,
+    ) -> Result<models::PlanResponse<models::Plan>, ClientError> {
+        let path = format!("/api/plans/{}/plan", id);
+        self.request(Method::GET, &path, None::<&()>).await
+    }
+
+    /// Get the current task
+    pub async fn get_current(
+        &self,
+        id: u8,
+    ) -> Result<models::PlanResponse<Option<models::Current>>, ClientError> {
+        let path = format!("/api/plans/{}/current", id);
+        self.request(Method::GET, &path, None::<&()>).await
+    }
+
+    /// Get the distilled context
+    pub async fn get_distilled_context(
+        &self,
+        id: u8,
+    ) -> Result<models::PlanResponse<()>, ClientError> {
+        let path = format!("/api/plans/{}/distilled", id);
+        self.request(Method::GET, &path, None::<&()>).await
+    }
+
+    /// Add a new task
+    pub async fn add_task(
+        &self,
+        id: u8,
+        description: String,
+        level_index: usize,
+    ) -> Result<models::PlanResponse<(models::Task, Index)>, ClientError> {
+        let path = format!("/api/plans/{}/task", id);
+        let body = AddTaskRequest {
+            description,
+            level_index,
+        };
+        self.request(Method::POST, &path, Some(&body)).await
+    }
+
+    /// Complete the current task
+    pub async fn complete_task(
+        &self,
+        id: u8,
+        index: Index,
+        lease: Option<u8>,
+        force: bool,
+        summary: Option<String>,
+    ) -> Result<models::PlanResponse<bool>, ClientError> {
+        let path = format!("/api/plans/{}/task/complete", id);
+        let body = CompleteTaskRequest {
+            index,
+            lease,
+            force,
+            summary,
+        };
+        self.request(Method::POST, &path, Some(&body)).await
+    }
+
+    /// Move to a specific task
+    pub async fn move_to(
+        &self,
+        id: u8,
+        index: Index,
+    ) -> Result<models::PlanResponse<Option<String>>, ClientError> {
+        let path = format!("/api/plans/{}/move", id);
+        let body = MoveToRequest { index };
+        self.request(Method::POST, &path, Some(&body)).await
+    }
+
+    /// Change the abstraction level of a task
+    pub async fn change_level(
+        &self,
+        id: u8,
+        index: Index,
+        level_index: usize,
+    ) -> Result<models::PlanResponse<Result<(), String>>, ClientError> {
+        let path = format!("/api/plans/{}/task/level", id);
+        let body = ChangeLevelRequest { index, level_index };
+        self.request(Method::POST, &path, Some(&body)).await
+    }
+
+    /// Generate a lease for a specific task
+    pub async fn generate_lease(
+        &self,
+        id: u8,
+        index: Index,
+    ) -> Result<models::PlanResponse<(models::Lease, Vec<String>)>, ClientError> {
+        let path = format!("/api/plans/{}/task/lease", id);
+        let body = LeaseRequest { index };
+        self.request(Method::POST, &path, Some(&body)).await
+    }
+
+    /// Removes a task by its index
+    pub async fn remove_task(
+        &self,
+        id: u8,
+        index: Index,
+    ) -> Result<models::PlanResponse<Result<models::Task, String>>, ClientError> {
+        let index_str = index
+            .iter()
+            .map(|i| i.to_string())
+            .collect::<Vec<_>>()
+            .join(",");
+        let path = format!("/api/plans/{}/tasks/{}", id, index_str);
+        self.request(Method::DELETE, &path, None::<&()>).await
+    }
+
+    /// Uncompletes a task by its index
+    pub async fn uncomplete_task(
+        &self,
+        id: u8,
+        index: Index,
+    ) -> Result<models::PlanResponse<Result<bool, String>>, ClientError> {
+        let path = format!("/api/plans/{}/task/uncomplete", id);
+        let body = UncompleteTaskRequest { index };
+        self.request(Method::POST, &path, Some(&body)).await
+    }
+
+    /// Plan Management Methods
+    pub async fn create_plan(&self) -> Result<models::Lease, ClientError> {
+        self.request(Method::POST, "/api/plans", None::<&()>).await
+    }
+
+    pub async fn delete_plan(&self, id: u8) -> Result<(), ClientError> {
+        let path = format!("/api/plans/{}", id);
+        self.request(Method::DELETE, &path, None::<&()>).await
+    }
+
+    pub async fn list_plans(&self) -> Result<Vec<models::Lease>, ClientError> {
+        self.request(Method::GET, "/api/plans", None::<&()>).await
     }
 }
 

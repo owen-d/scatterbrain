@@ -10,17 +10,17 @@ use std::task::{Context, Poll};
 use axum::{
     extract::{Path, State},
     http::StatusCode,
-    response::{Html, IntoResponse},
+    response::{Html, IntoResponse, Redirect, Response},
     routing::{delete, get, post},
     Json, Router,
 };
+use futures::Future;
 use futures::Stream;
 use serde::{Deserialize, Serialize};
 use tokio::net::TcpListener;
 use tower_http::cors::{Any, CorsLayer};
 
-use crate::models::PlanResponse;
-use crate::models::{self, parse_index, Index};
+use crate::models::{self, parse_index, Index, PlanError, PlanResponse};
 use crate::Core;
 
 /// Request to add a new task
@@ -108,6 +108,56 @@ impl<T: Serialize> ApiResponse<T> {
     }
 }
 
+/// Helper function to map Core results to Axum responses
+fn map_core_result_to_response<T: Serialize>(
+    result: Result<PlanResponse<T>, PlanError>,
+) -> Response {
+    match result {
+        Ok(plan_response) => {
+            (StatusCode::OK, Json(ApiResponse::success(plan_response))).into_response()
+        }
+        Err(PlanError::PlanNotFound(token)) => (
+            StatusCode::NOT_FOUND,
+            Json(ApiResponse::<PlanResponse<T>>::error(format!(
+                "Plan '{}' not found",
+                token
+            ))),
+        )
+            .into_response(),
+        Err(e) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(ApiResponse::<PlanResponse<T>>::error(format!(
+                "Internal server error: {}",
+                e
+            ))),
+        )
+            .into_response(),
+    }
+}
+
+/// Helper function to map Core results (without PlanResponse) to Axum responses
+fn map_core_result_simple<T: Serialize>(result: Result<T, PlanError>) -> Response {
+    match result {
+        Ok(data) => (StatusCode::OK, Json(ApiResponse::success(data))).into_response(),
+        Err(PlanError::PlanNotFound(token)) => (
+            StatusCode::NOT_FOUND,
+            Json(ApiResponse::<T>::error(format!(
+                "Plan '{}' not found",
+                token
+            ))),
+        )
+            .into_response(),
+        Err(e) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(ApiResponse::<T>::error(format!(
+                "Internal server error: {}",
+                e
+            ))),
+        )
+            .into_response(),
+    }
+}
+
 /// Starts the API server
 pub async fn serve(core: Core, config: ServerConfig) -> Result<(), Box<dyn std::error::Error>> {
     // Initialize tracing
@@ -121,18 +171,29 @@ pub async fn serve(core: Core, config: ServerConfig) -> Result<(), Box<dyn std::
 
     // Build application with routes
     let app = Router::new()
-        .route("/api/plan", get(get_plan))
-        .route("/api/current", get(get_current))
-        .route("/api/distilled", get(get_distilled_context))
-        .route("/api/task", post(add_task))
-        .route("/api/task/complete", post(complete_task))
-        .route("/api/task/level", post(change_level))
-        .route("/api/task/lease", post(generate_lease))
-        .route("/api/task/uncomplete", post(uncomplete_task))
-        .route("/api/move", post(move_to))
-        .route("/api/tasks/*index", delete(remove_task_handler))
-        .route("/ui", get(ui_handler))
-        .route("/ui/events", get(events_handler))
+        // --- Redirect root to the new plan listing UI --- //
+        .route("/", get(|| async { Redirect::permanent("/ui") })) // Redirect to /ui
+        // --- Plan Management --- //
+        .route(
+            "/api/plans",
+            get(list_plans_handler).post(create_plan_handler),
+        )
+        .route("/api/plans/:id", delete(delete_plan_handler))
+        // --- Existing Endpoints (now id-scoped) --- //
+        .route("/api/plans/:id/plan", get(get_plan))
+        .route("/api/plans/:id/current", get(get_current))
+        .route("/api/plans/:id/distilled", get(get_distilled_context))
+        .route("/api/plans/:id/task", post(add_task))
+        .route("/api/plans/:id/task/complete", post(complete_task))
+        .route("/api/plans/:id/task/level", post(change_level))
+        .route("/api/plans/:id/task/lease", post(generate_lease))
+        .route("/api/plans/:id/task/uncomplete", post(uncomplete_task))
+        .route("/api/plans/:id/move", post(move_to))
+        .route("/api/plans/:id/tasks/*index", delete(remove_task_handler))
+        // --- UI --- //
+        .route("/ui", get(list_plans_ui_handler)) // New route for listing plans
+        .route("/ui/:id", get(ui_handler)) // Specific plan UI using ID
+        .route("/ui/events/:id", get(events_handler)) // ID-scoped events
         .layer(cors)
         .with_state(core);
 
@@ -144,98 +205,224 @@ pub async fn serve(core: Core, config: ServerConfig) -> Result<(), Box<dyn std::
     Ok(())
 }
 
-// Handler implementations
-async fn get_plan(State(core): State<Core>) -> JSONResp<models::Plan> {
-    let plan_response = core.get_plan();
-    Json(ApiResponse::success(plan_response))
+// --- Plan Management Handlers --- //
+
+async fn list_plans_handler(State(core): State<Core>) -> impl IntoResponse {
+    let result = core.list_plans();
+    map_core_result_simple(result) // Returns Vec<Lease> (PlanId)
 }
 
-async fn get_current(State(core): State<Core>) -> JSONResp<Option<models::Current>> {
-    let response = core.current();
-    Json(ApiResponse::success(response))
+// --- New UI Handler for Listing Plans --- //
+
+async fn list_plans_ui_handler(State(core): State<Core>) -> impl IntoResponse {
+    match core.list_plans() {
+        Ok(plan_ids) => {
+            let mut html_content = String::new();
+            html_content.push_str(
+                "<!DOCTYPE html><html><head><title>Scatterbrain Plans</title></head><body>",
+            );
+            html_content.push_str("<h1>Available Scatterbrain Plans</h1>");
+
+            if plan_ids.is_empty() {
+                html_content.push_str("<p>No plans found. Create one using the CLI: <code>scatterbrain plan create</code></p>");
+            } else {
+                html_content.push_str("<ul>");
+                for id in plan_ids {
+                    let id_val = id.value();
+                    html_content.push_str(&format!(
+                        "<li><a href=\"/ui/{}\">Plan {}</a></li>",
+                        id_val, id_val
+                    ));
+                }
+                html_content.push_str("</ul>");
+            }
+
+            html_content.push_str("</body></html>");
+            Html(html_content)
+        }
+        Err(e) => {
+            // Log the error on the server
+            tracing::error!("Failed to list plans for UI: {}", e);
+            // Return a user-friendly HTML error page
+            Html(format!(
+                "<!DOCTYPE html><html><head><title>Error</title></head><body><h1>Error</h1><p>Could not load plan list: {}</p></body></html>",
+                e
+            ))
+        }
+    }
 }
 
-async fn get_distilled_context(State(core): State<Core>) -> JSONResp<()> {
-    let response = core.distilled_context();
-    Json(ApiResponse::success(response))
+async fn create_plan_handler(State(core): State<Core>) -> impl IntoResponse {
+    let result = core.create_plan();
+    map_core_result_simple(result) // Returns Lease (PlanId)
+}
+
+async fn delete_plan_handler(
+    State(core): State<Core>,
+    Path(id): Path<u8>, // Use u8 ID from path
+) -> impl IntoResponse {
+    let plan_id = models::Lease::new(id); // Use constructor
+    let result = core.delete_plan(&plan_id);
+    map_core_result_simple(result) // Use simple mapper as it returns ()
+}
+
+// --- Existing Handler Implementations (Updated) --- //
+
+async fn get_plan(State(core): State<Core>, Path(id): Path<u8>) -> impl IntoResponse {
+    let plan_id = models::Lease::new(id); // Use constructor
+    let result = core.get_plan(&plan_id);
+    map_core_result_to_response(result)
+}
+
+async fn get_current(State(core): State<Core>, Path(id): Path<u8>) -> impl IntoResponse {
+    let plan_id = models::Lease::new(id); // Use constructor
+    let response = core.current(&plan_id);
+    map_core_result_to_response(response)
+}
+
+async fn get_distilled_context(State(core): State<Core>, Path(id): Path<u8>) -> impl IntoResponse {
+    let plan_id = models::Lease::new(id); // Use constructor
+    let response = core.distilled_context(&plan_id);
+    map_core_result_to_response(response)
 }
 
 async fn add_task(
     State(core): State<Core>,
+    Path(id): Path<u8>,
     Json(payload): Json<AddTaskRequest>,
-) -> JSONResp<(models::Task, Index)> {
-    let response = core.add_task(payload.description, payload.level_index);
-    Json(ApiResponse::success(response))
+) -> impl IntoResponse {
+    let plan_id = models::Lease::new(id); // Use constructor
+    let response = core.add_task(&plan_id, payload.description, payload.level_index);
+    map_core_result_to_response(response)
 }
 
 async fn complete_task(
     State(core): State<Core>,
+    Path(id): Path<u8>,
     Json(payload): Json<CompleteTaskRequest>,
-) -> JSONResp<bool> {
-    let response = core.complete_task(payload.index, payload.lease, payload.force, payload.summary);
-    if *response.inner() {
-        Json(ApiResponse::success(response))
-    } else {
-        Json(ApiResponse::error(
-            "Failed to complete task (lease mismatch or other issue)".to_string(),
-        ))
+) -> impl IntoResponse {
+    let plan_id = models::Lease::new(id); // Use constructor
+    let response = core.complete_task(
+        &plan_id,
+        payload.index,
+        payload.lease, // Already Option<u8>
+        payload.force,
+        payload.summary,
+    );
+    // Custom handling for the bool inside PlanResponse<bool>
+    match response {
+        Ok(plan_response) => {
+            if *plan_response.inner() {
+                (StatusCode::OK, Json(ApiResponse::success(plan_response))).into_response()
+            } else {
+                // Use the distilled context from the response even on failure
+                (
+                    StatusCode::BAD_REQUEST, // Or another suitable code
+                    Json(ApiResponse::<PlanResponse<bool>>::error(format!(
+                        "Failed to complete task (lease mismatch, already complete, or other issue)"
+                    ))),
+                )
+                    .into_response()
+            }
+        }
+        Err(e) => map_core_result_to_response::<bool>(Err(e)), // Use helper for PlanErrors
     }
 }
 
 async fn change_level(
     State(core): State<Core>,
+    Path(id): Path<u8>,
     Json(payload): Json<ChangeLevelRequest>,
-) -> JSONResp<Result<(), String>> {
-    let response = core.change_level(payload.index, payload.level_index);
-    Json(ApiResponse::success(response))
+) -> impl IntoResponse {
+    let plan_id = models::Lease::new(id); // Use constructor
+    let response = core.change_level(&plan_id, payload.index, payload.level_index);
+    // Handle the Result<(), String> inside PlanResponse
+    match response {
+        Ok(plan_response) => match plan_response.inner() {
+            Ok(_) => (StatusCode::OK, Json(ApiResponse::success(plan_response))).into_response(),
+            Err(e) => (
+                StatusCode::BAD_REQUEST,
+                Json(ApiResponse::<PlanResponse<Result<(), String>>>::error(
+                    e.clone(),
+                )),
+            )
+                .into_response(),
+        },
+        Err(e) => map_core_result_to_response::<Result<(), String>>(Err(e)), // Use helper for PlanErrors
+    }
 }
 
 async fn generate_lease(
     State(core): State<Core>,
+    Path(id): Path<u8>,
     Json(payload): Json<LeaseRequest>,
-) -> JSONResp<(models::Lease, Vec<String>)> {
-    let response = core.generate_lease(payload.index);
-    Json(ApiResponse::success(response))
+) -> impl IntoResponse {
+    let plan_id = models::Lease::new(id); // Use constructor
+    let response = core.generate_lease(&plan_id, payload.index);
+    map_core_result_to_response(response)
 }
 
 async fn uncomplete_task(
     State(core): State<Core>,
+    Path(id): Path<u8>,
     Json(payload): Json<UncompleteTaskRequest>,
-) -> JSONResp<Result<bool, String>> {
-    let response = core.uncomplete_task(payload.index);
-    // Handle the Result inside the PlanResponse
-    match response.inner() {
-        Ok(true) => Json(ApiResponse::success(response)),
-        Ok(false) => Json(ApiResponse::error(
-            "Task was already incomplete or uncompletion failed silently".to_string(),
-        )), // Should ideally not happen with current logic
-        Err(e) => {
-            // Return the error message wrapped in the expected JSON response structure
-            Json(ApiResponse::error(e.clone()))
-        }
+) -> impl IntoResponse {
+    let plan_id = models::Lease::new(id); // Use constructor
+    let response = core.uncomplete_task(&plan_id, payload.index);
+    // Handle the Result<bool, String> inside PlanResponse
+    match response {
+        Ok(plan_response) => match plan_response.inner() {
+            Ok(true) => (StatusCode::OK, Json(ApiResponse::success(plan_response))).into_response(),
+            Ok(false) => (
+                StatusCode::BAD_REQUEST, // Should ideally not happen
+                Json(ApiResponse::<PlanResponse<Result<bool, String>>>::error(
+                    "Task was already incomplete or uncompletion failed silently".to_string(),
+                )),
+            )
+                .into_response(),
+            Err(e) => (
+                StatusCode::BAD_REQUEST,
+                Json(ApiResponse::<PlanResponse<Result<bool, String>>>::error(
+                    e.clone(),
+                )),
+            )
+                .into_response(),
+        },
+        Err(e) => map_core_result_to_response::<Result<bool, String>>(Err(e)), // Use helper for PlanErrors
     }
 }
 
 async fn move_to(
     State(core): State<Core>,
+    Path(id): Path<u8>,
     Json(payload): Json<MoveToRequest>,
-) -> JSONResp<Option<String>> {
-    let response = core.move_to(payload.index);
-
-    if response.inner().is_some() {
-        Json(ApiResponse::success(response))
-    } else {
-        Json(ApiResponse::error(
-            "Failed to move to requested task".to_string(),
-        ))
+) -> impl IntoResponse {
+    let plan_id = models::Lease::new(id); // Use constructor
+    let response = core.move_to(&plan_id, payload.index);
+    // Handle Option<String> inside PlanResponse
+    match response {
+        Ok(plan_response) => {
+            if plan_response.inner().is_some() {
+                (StatusCode::OK, Json(ApiResponse::success(plan_response))).into_response()
+            } else {
+                (
+                    StatusCode::BAD_REQUEST, // Or NOT_FOUND?
+                    Json(ApiResponse::<PlanResponse<Option<String>>>::error(
+                        "Failed to move: Task index not found".to_string(),
+                    )),
+                )
+                    .into_response()
+            }
+        }
+        Err(e) => map_core_result_to_response::<Option<String>>(Err(e)), // Use helper for PlanErrors
     }
 }
 
 async fn remove_task_handler(
     State(core): State<Core>,
-    Path(index_str): Path<String>,
+    Path((id, index_str)): Path<(u8, String)>, // Extract id (u8) and index string
 ) -> impl IntoResponse {
-    // Parse the index string
+    // Parse the index string (from the wildcard path)
     let index = match parse_index(&index_str) {
         Ok(idx) => idx,
         Err(e) => {
@@ -250,126 +437,201 @@ async fn remove_task_handler(
         }
     };
 
-    // Call the core logic
-    let result_response = core.remove_task(index);
-
-    // Map the inner result from core to the final HTTP response
-    match result_response.inner() {
-        Ok(_) => (
-            StatusCode::OK,
-            // Success: Wrap the PlanResponse (containing the removed Task)
-            Json(ApiResponse::success(result_response)),
-        )
-            .into_response(),
-        Err(e) => {
-            // Determine status code based on error message
-            let status = if e.contains("not found") || e.contains("out of bounds") {
-                StatusCode::NOT_FOUND
-            } else {
-                StatusCode::BAD_REQUEST // e.g., trying to remove root
-            };
-            // Error: Wrap the error message (still contained within the original PlanResponse)
-            // We need to clone the error string to put into ApiResponse::error
-            let error_message = e.clone();
-            // We also need the context from the original response
-            let _context = result_response.distilled_context;
-            // Construct the error response using ApiResponse::error
-            (status, Json(ApiResponse::<()>::error(error_message))).into_response()
-            // Note: We lose the original PlanResponse structure here on error, sending only the message.
-            // If preserving the full PlanResponse on error is desired, adjust the structure.
-        }
-    }
+    let plan_id = models::Lease::new(id); // Use constructor
+    let response = core.remove_task(&plan_id, index);
+    // Simplify: Use the mapping helper directly instead of custom match logic
+    map_core_result_to_response::<Result<models::Task, String>>(response)
 }
 
-// Event-stream handler for reactive updates
-async fn events_handler(State(core): State<Core>) -> impl IntoResponse {
-    // Set headers for event stream
-    let headers = [
-        (
-            axum::http::header::CONTENT_TYPE,
-            axum::http::HeaderValue::from_static("text/event-stream"),
-        ),
-        (
-            axum::http::header::CACHE_CONTROL,
-            axum::http::HeaderValue::from_static("no-cache"),
-        ),
-    ];
+// --- UI and Event Handlers (Updated for PlanId) --- //
 
-    let event_stream = EventStream::new(core);
+async fn events_handler(
+    State(core): State<Core>,
+    Path(id): Path<u8>, // Accept u8 ID from path
+) -> impl IntoResponse {
+    let receiver = core.subscribe();
+    // Pass the specific PlanId to the EventStream
+    let plan_id = models::Lease::new(id); // Use constructor
+    let stream = EventStream::new(core.clone(), receiver, plan_id);
 
-    // Return response with headers and stream body
-    (headers, axum::body::Body::from_stream(event_stream))
+    axum::response::sse::Sse::new(stream).keep_alive(axum::response::sse::KeepAlive::default())
 }
 
-// Custom EventStream implementation
 struct EventStream {
     core: Core,
-    receiver: tokio::sync::broadcast::Receiver<()>,
+    receiver: tokio::sync::broadcast::Receiver<models::PlanId>,
+    plan_id: models::PlanId,
 }
 
 impl EventStream {
-    fn new(core: Core) -> Self {
-        // Subscribe to updates
-        let receiver = core.subscribe();
-
-        Self { core, receiver }
+    // Accept and store the plan_id
+    fn new(
+        core: Core,
+        receiver: tokio::sync::broadcast::Receiver<models::PlanId>,
+        plan_id: models::PlanId,
+    ) -> Self {
+        Self {
+            core,
+            receiver,
+            plan_id,
+        }
     }
 }
 
 impl Stream for EventStream {
-    type Item = Result<String, Infallible>;
+    type Item = Result<axum::response::sse::Event, Infallible>;
 
-    fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
-        // Try to receive from the broadcast channel with a non-blocking approach
-        match self.receiver.try_recv() {
-            Ok(_) => {
-                // Successfully received an update notification, send event to client
-                Poll::Ready(Some(Ok("event: update\ndata: change\n\n".to_string())))
+    fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
+        // Use recv() in a polled future
+        // Resubscribe to get a new receiver handle that can be moved.
+        let mut receiver = self.receiver.resubscribe();
+        let core = self.core.clone(); // Clone core for async block
+                                      // Clone the specific plan_id for the async block
+        let stream_plan_id = self.plan_id; // Lease is Copy, no clone needed
+
+        let mut fut = Box::pin(async move {
+            // Loop until we get a relevant id update or error
+            loop {
+                match receiver.recv().await {
+                    Ok(updated_id) => {
+                        // Only process if the update is for this stream's specific id
+                        if updated_id == stream_plan_id {
+                            // An update occurred for the relevant plan `id`
+                            match core.distilled_context(&updated_id) {
+                                Ok(response) => {
+                                    let json_data = serde_json::to_string(&response.context())
+                                        .unwrap_or_default();
+                                    let event: axum::response::sse::Event =
+                                        axum::response::sse::Event::default()
+                                            .event("update")
+                                            .data(json_data);
+                                    // Break loop and return the event
+                                    break Some(Ok(event));
+                                }
+                                Err(e) => {
+                                    eprintln!(
+                                        // Use Debug formatting for PlanId (Lease)
+                                        "Error fetching context for event stream (id {:?}): {}",
+                                        updated_id, e
+                                    );
+                                    // Decide how to handle error, maybe return None or skip
+                                    // Break loop and signal error/end?
+                                    break None;
+                                }
+                            }
+                        }
+                        // If id doesn't match, continue loop to wait for next message
+                    }
+                    Err(tokio::sync::broadcast::error::RecvError::Lagged(n)) => {
+                        eprintln!(
+                            // Use Debug formatting for PlanId (Lease)
+                            "SSE stream for {:?} lagged by {} messages",
+                            stream_plan_id, n
+                        );
+                        // Decide how to handle lag, maybe return None or special event
+                        // Break loop and signal error/end?
+                        break None;
+                    }
+                    Err(tokio::sync::broadcast::error::RecvError::Closed) => {
+                        // Break loop and signal stream end
+                        break None;
+                    }
+                }
             }
-            Err(tokio::sync::broadcast::error::TryRecvError::Empty) => {
-                // No updates available now, register the waker to be notified later
-                // Create a task to wake this future when the receiver might have data
-                let waker = cx.waker().clone();
-                tokio::spawn(async move {
-                    tokio::time::sleep(std::time::Duration::from_millis(50)).await;
-                    waker.wake();
-                });
-                Poll::Pending
+        });
+
+        // Poll the future we created, ensuring Future trait is in scope
+        fut.as_mut().poll(cx)
+    }
+}
+
+// TODO: Update ui_handler to accept token and render for that plan
+async fn ui_handler(State(core): State<Core>, Path(id): Path<u8>) -> impl IntoResponse {
+    // Fetch all plan IDs for tabs
+    let all_ids = match core.list_plans() {
+        Ok(ids) => ids,
+        Err(e) => {
+            return Html(format!("<h1>Error loading plan list: {}</h1>", e)).into_response();
+        }
+    };
+    let current_plan_id = models::Lease::new(id); // Use constructor
+
+    // Fetch data for the requested plan id
+    match core.get_plan(&current_plan_id) {
+        Ok(plan_response) => {
+            let plan = plan_response.inner();
+            // Fetch current and distilled for the current plan id
+            let current = core
+                .current(&current_plan_id)
+                .ok()
+                .and_then(|pr| pr.into_inner());
+            let distilled_context_res = core.distilled_context(&current_plan_id);
+
+            match distilled_context_res {
+                Ok(distilled_response) => {
+                    let distilled_context = distilled_response.context(); // Extract the context
+                    Html(render_ui_template(
+                        &current_plan_id, // Pass current PlanId
+                        &all_ids,         // Pass all PlanIds
+                        plan,
+                        current.as_ref(),
+                        &distilled_context,
+                    ))
+                    .into_response()
+                }
+                Err(e) => {
+                    // Handle error fetching distilled context for the specific plan
+                    Html(format!(
+                        "<h1>Error loading context for plan {:?}: {}</h1>",
+                        current_plan_id, e
+                    ))
+                    .into_response()
+                }
             }
-            Err(tokio::sync::broadcast::error::TryRecvError::Lagged(_)) => {
-                // Some messages were missed, but that's okay
-                // Just notify the client that there was a change
-                Poll::Ready(Some(Ok("event: update\ndata: change\n\n".to_string())))
-            }
-            Err(tokio::sync::broadcast::error::TryRecvError::Closed) => {
-                // Channel closed, try to resubscribe
-                self.receiver = self.core.subscribe();
-                Poll::Pending
-            }
+        }
+        Err(PlanError::PlanNotFound(_)) => {
+            Html(format!("<h1>Plan {:?} not found</h1>", current_plan_id)).into_response()
+        }
+        Err(e) => {
+            // Handle other errors fetching the plan itself
+            Html(format!(
+                "<h1>Error loading plan {:?}: {}</h1>",
+                current_plan_id, e
+            ))
+            .into_response()
         }
     }
 }
 
-// UI handler
-async fn ui_handler(State(core): State<Core>) -> impl IntoResponse {
-    let plan_response = core.get_plan();
-    let current_response = core.current();
-    let distilled_context = core.distilled_context().distilled_context;
-    let current_opt = current_response.inner();
-    let plan = plan_response.inner();
+// --- Template Rendering (Needs Update for PlanId) --- //
 
-    // Render the UI template, passing the distilled context
-    let html = render_ui_template(plan, current_opt.as_ref(), &distilled_context);
-    Html(html).into_response()
-}
-
-// Render the UI HTML template
 fn render_ui_template(
+    current_plan_id: &models::PlanId,
+    all_ids: &[models::PlanId],
     plan: &crate::models::Plan,
     current: Option<&crate::models::Current>,
     distilled_context: &crate::models::DistilledContext,
 ) -> String {
     let mut html = String::from(HTML_TEMPLATE_HEADER);
+
+    // --- Plan Tab Navigation ---
+    html.push_str("<nav class='plan-tabs'>");
+    if all_ids.is_empty() {
+        html.push_str("<span class='no-plans'>No plans loaded.</span>");
+    } else {
+        for id in all_ids {
+            let class = if id == current_plan_id { "active" } else { "" };
+            // Use id.value() for the URL and display text
+            html.push_str(&format!(
+                "<a href='/ui/{}' class='{}'>Plan {}</a>",
+                id.value(),
+                class,
+                id.value()
+            ));
+        }
+    }
+    html.push_str("</nav>");
+    // --- End Plan Tab Navigation ---
 
     // Add level legend
     html.push_str("<div class='level-legend'>");
@@ -480,6 +742,12 @@ fn render_ui_template(
         }
     }
     html.push_str("</ul></div>");
+
+    // Embed the current plan id value for use in JavaScript
+    html.push_str(&format!(
+        "<script>const CURRENT_PLAN_ID = {};</script>",
+        current_plan_id.value()
+    ));
 
     html.push_str(HTML_TEMPLATE_FOOTER); // Footer now only contains closing tags and script
     html
@@ -830,7 +1098,15 @@ const HTML_TEMPLATE_FOOTER: &str = r#"
         let eventSource;
         
         function connectEvents() {
-            eventSource = new EventSource('/ui/events');
+            // Use the CURRENT_PLAN_ID injected by the template
+            if (typeof CURRENT_PLAN_ID === 'undefined') {
+                console.error('CURRENT_PLAN_ID is not defined.');
+                statusText.textContent = 'Error: Plan ID missing.';
+                return;
+            }
+            const eventSourceUrl = '/ui/events/' + CURRENT_PLAN_ID;
+            console.log('Connecting to SSE:', eventSourceUrl); 
+            eventSource = new EventSource(eventSourceUrl);
             
             eventSource.onopen = () => {
                 statusIndicator.classList.add('connected');

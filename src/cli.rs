@@ -4,15 +4,16 @@
 
 use clap::{CommandFactory, Parser, Subcommand};
 use clap_complete::{generate, Shell};
-use std::io;
+use std::env;
+use std::io; // Import env module
 
 use crate::{
     api::{serve, Client, ClientConfig, ClientError, ServerConfig},
-    models::{
-        default_levels, parse_index, Context, Core, Current, Plan, PlanResponse, Task,
-        TaskTreeNode,
-    },
+    models::{parse_index, Core, Current, PlanId, PlanResponse, TaskTreeNode},
 };
+
+// Environment variable for the plan token
+const PLAN_ID_ENV_VAR: &str = "SCATTERBRAIN_PLAN_ID";
 
 #[derive(Parser)]
 #[command(author, version, about, long_about = None)]
@@ -23,6 +24,10 @@ pub struct Cli {
     /// API server URL
     #[arg(short, long, default_value = "http://localhost:3000")]
     server: String,
+
+    /// Target plan ID (overrides SCATTERBRAIN_PLAN_ID env var)
+    #[arg(long)]
+    plan: Option<u8>,
 }
 
 #[derive(Subcommand)]
@@ -50,9 +55,6 @@ enum Commands {
         index: String,
     },
 
-    /// Get the plan
-    Plan,
-
     /// Get the current task
     Current,
 
@@ -68,6 +70,10 @@ enum Commands {
         #[arg(value_enum)]
         shell: Shell,
     },
+
+    /// Plan management commands
+    #[command(name = "plan", subcommand)] // Add plan subcommand
+    PlanCmd(PlanCommands), // Use a different name to avoid conflict with the "Plan" viewing command
 }
 
 #[derive(Subcommand)]
@@ -128,6 +134,27 @@ enum TaskCommands {
     },
 }
 
+// Define PlanCommands Enum
+#[derive(Subcommand)]
+enum PlanCommands {
+    /// Create a new plan and prints its ID (u8)
+    Create,
+    /// Delete a plan by its ID
+    Delete {
+        /// The ID (0-255) of the plan to delete
+        id: u8,
+    },
+    /// List all available plan IDs
+    List,
+    /// Set the active plan ID (EXPERIMENTAL - might use env var instead)
+    Set {
+        /// The ID (0-255) to set as active
+        id: u8,
+    },
+    /// Show the details of the current plan (tasks, levels)
+    Show,
+}
+
 /// Run the CLI application
 pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
     let cli = Cli::parse();
@@ -136,17 +163,17 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
         Commands::Serve { port, example } => {
             println!("Starting scatterbrain API server on port {}...", port);
 
-            // Create a default plan with the default levels
-            let plan = Plan::new(default_levels());
-            let mut context = Context::new(plan);
+            // Core::new() now initializes the default plan
+            let core = Core::new();
 
-            // Add example tasks if requested
+            // Add example tasks if requested (needs adjustment if Core API changes)
             if *example {
-                println!("Populating with example task tree for UI testing...");
-                create_example_tasks(&mut context);
+                println!("Populating default plan with example task tree for UI testing...");
+                // Need to access the default context within core - requires Core modification or different approach
+                // For now, let's skip example population if not easily doable
+                // create_example_tasks(&mut context);
+                eprintln!("Warning: --example flag currently only works if Core struct provides direct access to modify the default context, which may have changed.");
             }
-
-            let core = Core::new(context);
 
             // Create a server configuration with the specified port
             let config = ServerConfig {
@@ -160,20 +187,19 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
 
         Commands::Task { command } => {
             let client = create_client(&cli.server);
+            let id = get_plan_id(&cli)?; // id is PlanId
+
             let result = match command {
                 TaskCommands::Add { description, level } => {
-                    // Add the task, passing the level
-                    let response = client.add_task(description.clone(), *level).await?;
-
-                    // Get the task and index from the response
+                    // Pass id.value() to client method
+                    let response = client
+                        .add_task(id.value(), description.clone(), *level)
+                        .await?;
                     let (_task, index) = response.inner();
-
-                    // No longer need to manually change the level here, it's set during add
                     println!(
                         "Added task: \"{}\" with level {} at index: {:?}",
                         description, level, index
                     );
-
                     Ok(())
                 }
 
@@ -185,7 +211,6 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
                 } => {
                     // Determine the target index
                     let target_index = if let Some(index_str) = index_str_opt {
-                        // Parse the provided index string
                         match parse_index(index_str) {
                             Ok(idx) => idx,
                             Err(e) => {
@@ -194,70 +219,82 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
                             }
                         }
                     } else {
-                        // If no index is provided, use the current index
-                        vec![] // Pass an empty index to indicate current task
+                        // Get the current index for the *active* plan (id is PlanId)
+                        // Pass id.value() to get_current
+                        match client.get_current(id.value()).await {
+                            Ok(current_response) => current_response.inner().as_ref().map_or_else(
+                                || {
+                                    eprintln!("Error: Cannot complete current task - no task is currently selected in plan {}.", id.value()); // Use id.value() for display
+                                    Err(Box::<dyn std::error::Error>::from(
+                                        "No current task selected",
+                                    ))
+                                },
+                                |current| Ok(current.index.clone()),
+                            )?,
+                            Err(e) => {
+                                eprintln!(
+                                    "Error fetching current task index for plan {}: {}",
+                                    id.value(),
+                                    e
+                                ); // Use id.value() for display
+                                return Err(e.into());
+                            }
+                        }
                     };
 
-                    // Pass the target index, lease, force, and summary to the client call
+                    // Pass id.value() and lease (Option<u8>) to client method
                     let response = client
-                        .complete_task(target_index, *lease, *force, summary.clone())
+                        .complete_task(
+                            id.value(),
+                            target_index.clone(),
+                            *lease,
+                            *force,
+                            summary.clone(),
+                        )
                         .await?;
 
                     print_response(&response, |success| {
                         if *success {
-                            // TODO: Include the index in the completion message
-                            println!("Completed task");
+                            let index_display = target_index
+                                .iter()
+                                .map(|i| i.to_string())
+                                .collect::<Vec<_>>()
+                                .join(",");
+                            println!("Completed task at index: [{}]", index_display);
                         } else {
-                            println!(
-                                "Failed to complete task (lease mismatch? use --force to override)"
-                            );
+                            println!("Failed to complete task (lease mismatch? already complete? check server logs)");
                         }
                     });
-
                     Ok(())
                 }
 
                 TaskCommands::ChangeLevel { level_index } => {
-                    // Get the current position
-                    let current_response = client.get_current().await?;
+                    // Get the current position for the active plan (id is PlanId)
+                    let current_response = client.get_current(id.value()).await?;
+                    let index = match current_response.inner().as_ref() {
+                        Some(current) => current.index.clone(),
+                        None => return Err("No current task selected".into()),
+                    };
 
-                    // Safely extract the inner value
-                    if current_response.inner().is_none() {
-                        return Err("No current task selected".into());
-                    }
-
-                    // Clone the index to avoid borrowing issues
-                    let index = current_response.inner().as_ref().unwrap().index.clone();
-
-                    // Change the level
-                    let response = client.change_level(index, *level_index).await?;
-
+                    // Pass id.value() to client method
+                    let response = client.change_level(id.value(), index, *level_index).await?;
                     print_response(&response, |_| {
-                        println!(
-                            "Changed the abstraction level of the current task to {}",
-                            level_index
-                        );
+                        println!("Changed level of current task to {}", level_index);
                     });
                     Ok(())
                 }
 
                 TaskCommands::Lease { index } => {
-                    // Parse the index string
                     let parsed_index = parse_index(index)?;
-
-                    // Generate the lease
-                    let response = client.generate_lease(parsed_index).await?;
-
-                    // Unpack the response tuple
+                    // Pass id.value() to client method
+                    let response = client.generate_lease(id.value(), parsed_index).await?;
                     let (lease, suggestions) = response.inner();
-
                     println!(
+                        // Use lease.value() for printing
                         "Generated lease {} for task at index: {}",
                         lease.value(),
                         index
                     );
-
-                    // Print suggestions if any
                     if !suggestions.is_empty() {
                         println!("\nVerification Suggestions:");
                         for suggestion in suggestions {
@@ -268,91 +305,63 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
                 }
 
                 TaskCommands::Remove { index } => {
-                    // Parse the index string
-                    let parsed_index = match parse_index(index) {
-                        Ok(idx) => idx,
-                        Err(e) => {
-                            eprintln!("Error parsing index: {}", e);
-                            return Err(e.into()); // Exit if index is invalid
-                        }
-                    };
-
-                    // Call the client method to remove the task
-                    match client.remove_task(parsed_index).await {
+                    let parsed_index = parse_index(index)?;
+                    // Pass id.value() to client method
+                    match client.remove_task(id.value(), parsed_index).await {
                         Ok(response) => {
-                            print_response(&response, |removed_task: &Task| {
-                                println!(
+                            // Handle the nested Result<Task, String>
+                            print_response(&response, |result| match result {
+                                Ok(removed_task) => println!(
                                     "Removed task: \"{}\" at index: {}",
                                     removed_task.description(),
                                     index // Use original string for display
-                                );
+                                ),
+                                Err(e) => eprintln!(
+                                    "Server error removing task at index {}: {}",
+                                    index, e
+                                ),
                             });
                         }
                         Err(e) => {
-                            eprintln!("Error removing task: {}", e);
-                            // Consider printing distilled context even on error?
-                            // For now, just print the error.
+                            eprintln!("Client error removing task: {}", e);
                         }
                     };
                     Ok(())
                 }
 
                 TaskCommands::Uncomplete { index } => {
-                    // Parse the index string
-                    let parsed_index = match parse_index(index) {
-                        Ok(idx) => idx,
-                        Err(e) => {
-                            eprintln!("Error parsing index: {}", e);
-                            return Err(e.into()); // Exit if index is invalid
-                        }
-                    };
-
-                    // Call the client method to uncomplete the task
-                    match client.uncomplete_task(parsed_index).await {
+                    let parsed_index = parse_index(index)?;
+                    // Pass id.value() to client method
+                    match client.uncomplete_task(id.value(), parsed_index).await {
                         Ok(response) => {
-                            print_response(
-                                &response,
-                                |result: &Result<bool, String>| match result {
-                                    Ok(true) => {
-                                        println!("Uncompleted task at index: {}", index);
-                                    }
-                                    Ok(false) => {
-                                        // This case shouldn't technically happen based on current core logic
-                                        println!(
-                                        "Task at index {} was already incomplete or uncompletion failed.",
-                                        index
-                                    );
-                                    }
-                                    Err(e) => {
-                                        // Error messages from core are printed here
-                                        eprintln!(
-                                            "Failed to uncomplete task at index {}: {}",
-                                            index, e
-                                        );
-                                    }
-                                },
-                            );
+                            print_response(&response, |result| match result {
+                                Ok(true) => println!("Uncompleted task at index: {}", index),
+                                Ok(false) => {
+                                    println!("Task at index {} was already incomplete.", index)
+                                }
+                                Err(e) => eprintln!(
+                                    "Server error uncompleting task at index {}: {}",
+                                    index, e
+                                ),
+                            });
                         }
                         Err(e) => {
-                            eprintln!("Error uncompleting task: {}", e);
-                            // Handle client-level errors (e.g., connection issues)
+                            eprintln!("Client error uncompleting task: {}", e);
                         }
                     };
                     Ok(())
                 }
             };
-
             result
         }
 
         Commands::Move { index } => {
             let client = create_client(&cli.server);
-
-            // Parse the index string (format: 0 or 0,1,2)
+            let id = get_plan_id(&cli)?; // id is PlanId
             let parsed_index = parse_index(index)?;
 
-            let response = client.move_to(parsed_index).await?;
-
+            // Pass id.value() to client method
+            let response = client.move_to(id.value(), parsed_index).await?;
             print_response(&response, |description: &Option<String>| {
                 println!(
                     "Moved to task: \"{}\" at index: {}",
@@ -360,91 +369,150 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
                     index
                 );
             });
-
-            Ok(())
-        }
-
-        Commands::Plan => {
-            let client = create_client(&cli.server);
-
-            let plan_response = client.get_plan().await?;
-            print_plan_response(&plan_response);
-
             Ok(())
         }
 
         Commands::Current => {
             let client = create_client(&cli.server);
-
-            let result = match client.get_current().await {
-                Ok(current_response) => {
-                    print_response(&current_response, |current: &Option<Current>| {
-                        // Check if we have a current task
-                        if let Some(current) = current {
-                            // Print current task info
-                            let current_clone = current.clone();
-
-                            println!("Current Task:");
-                            println!("  Description: {}", current_clone.task.description());
-                            println!("  Completed: {}", current_clone.task.is_completed());
-                            println!("  Level: {}", current_clone.level.description());
-                            println!("  Index: {:?}", current_clone.index);
-
-                            if !current_clone.task.subtasks().is_empty() {
-                                println!("\nSubtasks:");
-                                for (i, subtask) in current_clone.task.subtasks().iter().enumerate()
-                                {
-                                    println!(
-                                        "  {}. {} (completed: {})",
-                                        i,
-                                        subtask.description(),
-                                        subtask.is_completed()
-                                    );
-                                }
-                            }
-                        } else {
-                            println!("No current task selected. Use 'move' to select a task.");
+            let id = get_plan_id(&cli)?; // id is PlanId
+            let response = client.get_current(id.value()).await?;
+            print_response(&response, |current: &Option<Current>| {
+                if let Some(current) = current {
+                    println!("Current Task for Plan ID: {}", id.value()); // Use id.value() for display
+                    println!("  Description: {}", current.task.description());
+                    println!("  Completed: {}", current.task.is_completed());
+                    println!("  Level: {}", current.level.description());
+                    println!("  Index: {:?}", current.index);
+                    if !current.task.subtasks().is_empty() {
+                        println!("\nSubtasks:");
+                        for (i, subtask) in current.task.subtasks().iter().enumerate() {
+                            println!(
+                                "  {}. {} (completed: {})",
+                                i,
+                                subtask.description(),
+                                subtask.is_completed()
+                            );
                         }
-                    });
-
-                    Ok(())
+                    }
+                } else {
+                    println!("No current task selected in this plan. Use 'move' to select a task.");
                 }
-                Err(ClientError::Api(msg)) if msg.contains("Current task not found") => {
-                    println!("No current task selected. Use 'move' to select a task.");
-                    Ok(())
-                }
-                Err(e) => Err(e.into()),
-            };
-
-            result
+            });
+            Ok(())
         }
 
         Commands::Distilled => {
             let client = create_client(&cli.server);
-
-            let distilled_response = client.get_distilled_context().await?;
-            print_distilled_context_response(&distilled_response);
+            let id = get_plan_id(&cli)?; // id is PlanId
+            let response = client.get_distilled_context(id.value()).await?;
+            print_distilled_context_response(&response);
             Ok(())
         }
 
         Commands::Guide => {
             print_guide();
-
-            // Only display distilled context if a server is running
+            // Attempt to get context for default plan ID 0 using the flag logic
+            let default_id_cli = Cli {
+                command: Commands::Guide, // Placeholder
+                server: cli.server.clone(),
+                plan: Some(0), // Specify default ID 0
+            };
             let client = create_client(&cli.server);
-            if let Ok(distilled_response) = client.get_distilled_context().await {
-                print_distilled_context_response(&distilled_response);
+            match get_plan_id(&default_id_cli) {
+                // Use the modified cli struct with PlanId
+                Ok(default_id) => {
+                    match client.get_distilled_context(default_id.value()).await {
+                        // Pass PlanId
+                        Ok(distilled_response) => {
+                            println!(
+                                "\nDistilled Context for Default Plan (ID {}):\n",
+                                default_id.value()
+                            );
+                            print_distilled_context_response(&distilled_response);
+                        }
+                        Err(e) => {
+                            eprintln!(
+                                "Warning: Could not fetch context for default plan {}: {}",
+                                default_id.value(),
+                                e
+                            );
+                        }
+                    }
+                }
+                Err(_) => { /* Error handled by get_plan_id */ }
             }
-
             Ok(())
         }
 
         Commands::Completions { shell } => {
-            // Generate completions for the specified shell
             let mut cmd = Cli::command();
             let bin_name = cmd.get_name().to_string();
             generate(*shell, &mut cmd, bin_name, &mut io::stdout());
             Ok(())
+        }
+
+        Commands::PlanCmd(plan_command) => {
+            let client = create_client(&cli.server);
+            match plan_command {
+                PlanCommands::Create => {
+                    match client.create_plan().await {
+                        Ok(lease) => {
+                            let new_id = lease.value(); // lease is PlanId
+                            println!("Created new plan with ID: {}", new_id);
+                            println!(
+                                "Set the environment variable: export {}={}",
+                                PLAN_ID_ENV_VAR, new_id
+                            );
+                        }
+                        Err(e) => eprintln!("Error creating plan: {}", e),
+                    }
+                    Ok(())
+                }
+                PlanCommands::Delete { id } => {
+                    // id is u8, convert to PlanId
+                    let _plan_id_to_delete = PlanId::new(*id);
+                    // Pass the u8 value *id* to client.delete_plan
+                    match client.delete_plan(*id).await {
+                        Ok(_) => println!("Deleted plan with ID: {}", id),
+                        Err(ClientError::PlanNotFound(_)) => {
+                            eprintln!("Error: Plan with ID '{}' not found.", id)
+                        }
+                        Err(e) => eprintln!("Error deleting plan '{}': {}", id, e),
+                    }
+                    Ok(())
+                }
+                PlanCommands::List => {
+                    match client.list_plans().await {
+                        Ok(ids) => {
+                            println!("Available plan IDs:");
+                            if ids.is_empty() {
+                                println!("  (No plans found - use 'plan create' to start)");
+                            } else {
+                                for lease in ids {
+                                    // lease is PlanId
+                                    println!("  - {}", lease.value());
+                                }
+                            }
+                        }
+                        Err(e) => eprintln!("Error listing plans: {}", e),
+                    }
+                    Ok(())
+                }
+                PlanCommands::Set { id } => {
+                    println!("To set the active plan, use your shell's command:");
+                    println!("  export {}={}", PLAN_ID_ENV_VAR, id);
+                    println!("Note: This only affects the current shell session.");
+                    Ok(())
+                }
+                PlanCommands::Show => {
+                    // Handler for Show
+                    let client = create_client(&cli.server);
+                    let id = get_plan_id(&cli)?; // id is PlanId
+                    let response = client.get_plan(id.value()).await?;
+                    print_plan_response(&response);
+                    Ok(())
+                }
+            }
         }
     }
 }
@@ -453,7 +521,6 @@ fn create_client(server_url: &str) -> Client {
     let config = ClientConfig {
         base_url: server_url.to_string(),
     };
-
     Client::with_config(config)
 }
 
@@ -463,55 +530,41 @@ fn print_response<T, F>(response: &crate::models::PlanResponse<T>, print_inner: 
 where
     F: FnOnce(&T),
 {
-    // Print the inner value using the provided closure
     print_inner(response.inner());
-
-    // Print follow-up suggestions if any
     if !response.suggested_followups.is_empty() {
         println!("\nSuggested next steps:");
         for suggestion in &response.suggested_followups {
             println!("  • {}", suggestion);
         }
     }
-
-    // Print reminder if any
     if let Some(reminder) = &response.reminder {
         println!("\nReminder: {}", reminder);
     }
-
-    // Print the distilled context
     print_distilled_context_response(response);
 }
 
 fn print_plan_response(response: &crate::models::PlanResponse<crate::models::Plan>) {
-    print_response(response, |plan| {
-        println!("Scatterbrain Plan:");
-
-        println!("Levels: {}", plan.levels().len());
-
-        println!("\nRoot Tasks:");
-        if plan.root().subtasks().is_empty() {
-            println!("  No tasks yet. Add some with 'scatterbrain task add'");
-        } else {
-            // Recursively print the task tree
-            for (i, task) in plan.root().subtasks().iter().enumerate() {
-                print_task(task, vec![i]);
-            }
+    let plan = response.inner();
+    println!("Scatterbrain Plan:");
+    println!("Levels: {}", plan.levels().len());
+    println!("\nRoot Tasks:");
+    if plan.root().subtasks().is_empty() {
+        println!("  No tasks yet. Add some with 'scatterbrain task add'");
+    } else {
+        for (i, task) in plan.root().subtasks().iter().enumerate() {
+            print_task(task, vec![i]);
         }
-
-        println!("\nAvailable Levels:");
-        for (i, level) in plan.levels().iter().enumerate() {
-            println!("  {}. {}", i + 1, level.get_guidance());
-        }
-    });
+    }
+    println!("\nAvailable Levels:");
+    for (i, level) in plan.levels().iter().enumerate() {
+        println!("  {}. {}", i, level.get_guidance());
+    }
+    print_distilled_context_response(response);
 }
 
 /// Recursively prints a task and its subtasks with proper indentation
 fn print_task(task: &crate::models::Task, index: Vec<usize>) {
-    // Calculate indentation (2 spaces per level)
     let indent = "  ".repeat(index.len());
-
-    // Format the index as a string (e.g., "0.1.2")
     let index_str = index
         .iter()
         .map(|i| i.to_string())
@@ -524,7 +577,6 @@ fn print_task(task: &crate::models::Task, index: Vec<usize>) {
         "level: unknown".to_string()
     };
 
-    // Print the current task
     println!(
         "{}(index: [{}]) ({}), {} (completed: {})",
         indent,
@@ -534,7 +586,6 @@ fn print_task(task: &crate::models::Task, index: Vec<usize>) {
         task.is_completed()
     );
 
-    // Recursively print subtasks
     for (i, subtask) in task.subtasks().iter().enumerate() {
         let mut subtask_index = index.clone();
         subtask_index.push(i);
@@ -556,6 +607,29 @@ Scatterbrain helps you:
 - Navigate between different levels of abstraction
 - Track progress and maintain focus
 - Adapt your plan as work progresses
+- Manage multiple, separate plans simultaneously
+
+== GETTING STARTED: PLANS ==
+
+Scatterbrain organizes work into separate "plans". Each command needs to know which plan you're working on.
+
+1. CREATE A PLAN:
+   $ scatterbrain plan create
+   > Created new plan with ID: 42
+   > Set the environment variable: export SCATTERBRAIN_PLAN_ID=42
+
+2. SPECIFY THE ACTIVE PLAN:
+   You MUST tell scatterbrain which plan to use in one of two ways:
+   
+   a) ENVIRONMENT VARIABLE (Recommended for sessions):
+      $ export SCATTERBRAIN_PLAN_ID=42
+      $ scatterbrain current  # Now works with plan 42
+
+   b) --plan FLAG (Overrides env var for a single command):
+      $ scatterbrain --plan=42 current
+
+3. LIST PLANS:
+   $ scatterbrain plan list
 
 == ABSTRACTION LEVELS EXPLAINED ==
 
@@ -591,12 +665,12 @@ MOVING DOWN:
   • When your high-level approach is clear
   • When you're ready to define component boundaries
   • When you need to establish contracts between components
-  
+
   Level 2 → Level 3:
   • When component boundaries are well-defined
   • When you need to determine implementation sequence
   • When you're ready to identify dependencies
-  
+
   Level 3 → Level 4:
   • When the implementation sequence is clear
   • When you're ready to define specific tasks
@@ -607,12 +681,12 @@ MOVING UP:
   • When you've completed implementation tasks
   • When you need to reorganize remaining task sequence
   • When you need to reprioritize work
-  
+
   Level 3 → Level 2:
   • When you discover issues with component interfaces
   • When integration is more complex than expected
   • When you need to redefine component boundaries
-  
+
   Level 2 → Level 1:
   • When you find fundamental flaws in the approach
   • When components don't form a coherent system
@@ -620,30 +694,32 @@ MOVING UP:
 
 == WORKFLOW GUIDE ==
 
+(Ensure SCATTERBRAIN_PLAN_ID is set or use --plan=<id> for each command)
+
 1. CREATE A PLAN AND NAVIGATE THE LEVELS
    - Begin at Level 0 with high-level planning:
      $ scatterbrain task add --level 0 "Design system architecture"
      $ scatterbrain move 0
-     
+
    - Add subtasks at appropriate levels:
      $ scatterbrain task add --level 1 "Identify core components"
      $ scatterbrain move 0,0
-     
+
    - Continue adding more granular tasks at deeper levels
 
 2. STAY ON TRACK
    - Regularly review your plan:
-     $ scatterbrain plan
-     
+     $ scatterbrain plan show
+
    - Focus on your current task:
      $ scatterbrain current
-     
+
    - Get a distilled context:
      $ scatterbrain distilled
-     
+
    - Complete tasks when finished:
      $ scatterbrain task complete --summary "Implemented the feature"
-     
+
    - Complete tasks requiring a lease:
      Some tasks require a 'lease' token for completion, ensuring only one agent
      attempts completion at a time.
@@ -652,11 +728,11 @@ MOVING UP:
         > Generated lease 123 for task at index: 0,1,2
      2. Complete the task using the generated lease ID and provide a summary:
         $ scatterbrain task complete --lease 123 --summary "Completed task with lease"
-     
+
      Note: If the lease doesn't match, completion will fail unless you use --force.
      Using --force bypasses both lease and summary checks; use it sparingly.
      $ scatterbrain task complete --force
-     
+
    - Move between tasks to adapt to changing priorities:
      $ scatterbrain move 1,2
 
@@ -668,36 +744,48 @@ MOVING UP:
 
 == COMMAND REFERENCE ==
 
-TASK MANAGEMENT:
-  $ scatterbrain task add --level <LEVEL> "Task description"    Create new task (level is required)
-                                                                Note: Adding a subtask will mark its parent(s) as incomplete.
+GLOBAL FLAGS:
+  --plan=<id>                                            Specify the plan ID for this command (overrides env var)
+  --server=<url>                                         Specify the server URL (default: http://localhost:3000)
+
+PLAN MANAGEMENT (scatterbrain plan ...):
+  $ scatterbrain plan create                             Create a new plan and print its ID
+  $ scatterbrain plan delete <id>                        Delete a plan by its ID
+  $ scatterbrain plan list                               List available plan IDs
+  $ scatterbrain plan set <id>                           (Info only) Shows how to set the environment variable
+  $ scatterbrain plan show                               View the full plan with all tasks
+
+TASK MANAGEMENT (scatterbrain task ...):
+  $ scatterbrain task add --level <LEVEL> "Description"  Create new task (level required)
+                                                         Note: Adding a subtask marks parents incomplete.
   $ scatterbrain task complete [--lease <ID>] [--force] [--summary <TEXT>] Complete current task (summary required unless --force)
-  $ scatterbrain task complete --index <INDEX> [--lease <ID>] [--force] [--summary <TEXT>] Complete task at specified index
-  $ scatterbrain task change-level <LEVEL_INDEX>               Change current task's abstraction level
-  $ scatterbrain task lease <INDEX>                            Generate a lease for a task
-  $ scatterbrain task remove <INDEX>                           Remove a task by its index (e.g., 0,1,2)
-  $ scatterbrain task uncomplete <INDEX>                       Uncomplete a task by its index
-  
-NAVIGATION:
-  $ scatterbrain move <INDEX>                                  Navigate to a task (e.g., 0 or 0,1,2)
-  
-VIEWING:
-  $ scatterbrain plan                                          View the full plan with all tasks
-  $ scatterbrain current                                       View details of the current task
-  $ scatterbrain distilled                                     View a distilled context of your plan
-  
-SERVER MANAGEMENT:
-  $ scatterbrain serve                                         Start the API server on default port 3000
-  $ scatterbrain serve --port <PORT>                           Start the API server on a custom port
-  $ scatterbrain serve --example                               Start with example task tree for testing
-  
-HELP & UTILITIES:
-  $ scatterbrain guide                                         Show this guide
-  $ scatterbrain completions <SHELL>                           Generate shell completions
-  $ scatterbrain <COMMAND> --help                              Show help for a specific command
-  $ scatterbrain --server <URL>                                Connect to a custom server URL
+  $ scatterbrain task complete --index <INDEX> [...]     Complete task at specified index
+  $ scatterbrain task change-level <LEVEL_INDEX>         Change current task's abstraction level
+  $ scatterbrain task lease <INDEX>                      Generate a lease for a task
+  $ scatterbrain task remove <INDEX>                     Remove a task by its index (e.g., 0,1,2)
+  $ scatterbrain task uncomplete <INDEX>                 Uncomplete a task by its index
+
+NAVIGATION & VIEWING (scatterbrain ...):
+  $ scatterbrain move <INDEX>                            Navigate to a task (e.g., 0 or 0,1,2)
+  $ scatterbrain current                                 View details of the current task
+  $ scatterbrain distilled                               View a distilled context of your plan
+
+SERVER MANAGEMENT (scatterbrain serve ...):
+  $ scatterbrain serve                                   Start API server (default port 3000)
+  $ scatterbrain serve --port <PORT>                     Start API server on a custom port
+  $ scatterbrain serve --example                         Start with example task tree (plan ID 0)
+
+HELP & UTILITIES (scatterbrain ...):
+  $ scatterbrain guide                                   Show this guide
+  $ scatterbrain completions <SHELL>                     Generate shell completions
+  $ scatterbrain <COMMAND> --help                        Show help for a specific command
 
 == BEST PRACTICES ==
+
+PLAN MANAGEMENT:
+  • Use `export SCATTERBRAIN_PLAN_ID=<id>` for most work within a shell session.
+  • Use `--plan=<id>` for one-off commands targeting a different plan.
+  • Regularly use `plan list` to see available plans.
 
 PRODUCTIVITY TECHNIQUES:
   • Focus on one task at a time
@@ -712,6 +800,7 @@ LEVEL USAGE:
   • Use Level 3 for "how" questions
 
 COMMON MISTAKES TO AVOID:
+  • Forgetting to set SCATTERBRAIN_PLAN_ID or use --plan=<id>.
   • Premature implementation detail: Diving into code specifics at Level 0
   • Inconsistent abstractions: Mixing high-level and low-level concerns
   • Abstraction resistance: Staying too high-level when details are needed
@@ -732,114 +821,16 @@ COMMON MISTAKES TO AVOID:
     println!("{}", guide);
 }
 
-/// Creates an example task tree for UI testing
-fn create_example_tasks(context: &mut Context) {
-    // Create top-level tasks (level 0 - Business Strategy)
-    let result = context.add_task("Build Web Application".to_string(), 0);
-    let (_, idx_root) = result.into_inner(); // Keep root index
-    context.move_to(idx_root.clone()).inner();
-
-    // Level 1 - Project Planning
-    let result = context.add_task("Implement Frontend".to_string(), 1);
-    let (_, idx_frontend) = result.into_inner();
-    context.move_to(idx_frontend.clone()).inner();
-
-    // Level 2 - Implementation
-    let result = context.add_task("Design UI Components".to_string(), 2);
-    let (_, idx_ui_components) = result.into_inner();
-    context.move_to(idx_ui_components.clone()).inner();
-
-    // Level 3 - Implementation Details
-    let result = context.add_task("Implement User Authentication UI".to_string(), 3);
-    let (_, idx_auth_ui) = result.into_inner();
-    // -- Complete this task --
-    context
-        .complete_task(idx_auth_ui, None, true, Some("Auth UI done.".to_string()))
-        .inner();
-
-    // Move back up to "Implement Frontend"
-    context.move_to(idx_frontend.clone()).inner();
-
-    // Add another subtask to "Implement Frontend"
-    let result = context.add_task("Set up State Management".to_string(), 2);
-    let (_, idx_state_mgmt) = result.into_inner(); // Keep this index for final cursor
-
-    // Move back to root
-    context.move_to(idx_root.clone()).inner();
-
-    // Add "Implement Backend" as subtask of "Build Web Application"
-    let result = context.add_task("Implement Backend".to_string(), 1);
-    let (_, idx_backend) = result.into_inner();
-    context.move_to(idx_backend.clone()).inner();
-
-    // Add backend tasks
-    let result = context.add_task("Set up Database".to_string(), 2);
-    let (_, idx_db) = result.into_inner();
-    context.move_to(idx_db.clone()).inner();
-
-    // Add some API endpoint tasks
-    let result = context.add_task("Create API Endpoints".to_string(), 3);
-    let (_, idx_api) = result.into_inner();
-    // -- Complete this task --
-    context
-        .complete_task(
-            idx_api,
-            None,
-            true,
-            Some("Basic CRUD endpoints added.".to_string()),
-        )
-        .inner();
-
-    context
-        .add_task("Implement Authentication Logic".to_string(), 3)
-        .into_inner();
-    context
-        .add_task("Create Data Models".to_string(), 3)
-        .into_inner();
-
-    // Move back to "Set up Database"
-    context.move_to(idx_db.clone()).inner();
-
-    // Add database schema tasks
-    let result = context.add_task("Product Model".to_string(), 3);
-    let (_, idx_prod_model) = result.into_inner();
-    context.move_to(idx_prod_model.clone()).inner();
-
-    // Add some fields
-    context
-        .add_task("Define Product Fields".to_string(), 3)
-        .into_inner();
-    context
-        .add_task("Implement Relationships".to_string(), 3)
-        .into_inner();
-
-    // Move back to root level
-    context.move_to(idx_root.clone()).inner();
-
-    // Add a few more top level tasks
-    context
-        .add_task("Write Documentation".to_string(), 0)
-        .into_inner();
-    context
-        .add_task("Test Application".to_string(), 0)
-        .into_inner();
-
-    // Set final cursor position to the incomplete "Set up State Management" task
-    context.move_to(idx_state_mgmt).inner();
-}
-
 /// Print a distilled context from any PlanResponse
 fn print_distilled_context_response<T>(response: &PlanResponse<T>) {
     let context = &response.distilled_context;
 
+    // Removed plan_id display as it's not available in PlanResponse<T>
     println!("\n=== DISTILLED CONTEXT ===\n");
 
-    // Print usage summary (Consider making this optional or shorter in the future)
-    println!("USAGE SUMMARY:");
-    println!("{}", context.usage_summary);
+    println!("Usage Summary: {}", context.usage_summary);
     println!("");
 
-    // Helper function to find the current node in the tree
     fn find_current_node(nodes: &[TaskTreeNode]) -> Option<&TaskTreeNode> {
         for node in nodes {
             if node.is_current {
@@ -854,12 +845,10 @@ fn print_distilled_context_response<T>(response: &PlanResponse<T>) {
         None
     }
 
-    // Print current task and level
     println!("CURRENT POSITION:");
-    let mut current_level_index: Option<usize> = None; // To store the index of the current level
+    let mut current_level_index: Option<usize> = None;
 
     if let Some(current_node) = find_current_node(&context.task_tree) {
-        // Use the TaskTreeNode for index, description, completion status
         let index_str = current_node
             .index
             .iter()
@@ -877,45 +866,36 @@ fn print_distilled_context_response<T>(response: &PlanResponse<T>) {
         );
         println!("  Index: {}", index_str);
 
-        // Try to get the level index from the actual Task data if available
         if let Some(task) = &context.current_task {
-            current_level_index = task.level_index(); // Use explicit level if set
+            current_level_index = task.level_index();
         }
 
-        // If explicit level wasn't set in the Task, infer from index length
-        // (Note: This assumes depth corresponds to level if not explicitly set)
         if current_level_index.is_none() && !current_node.index.is_empty() {
-            current_level_index = Some(current_node.index.len() - 1); // Infer level = depth
+            current_level_index = Some(current_node.index.len() - 1);
         }
     } else {
-        // No current node found in the tree, implies we are at the root
         println!("  At root level (no task selected)");
-        // If at root, assume Level 0 is current for display purposes
         if !context.levels.is_empty() {
             current_level_index = Some(0);
         }
     }
 
-    // Print current level name based on the determined index
     if let Some(idx) = current_level_index {
         if let Some(level) = context.levels.get(idx) {
             println!("  Level: {} ({})", idx, level.name());
         } else {
-            println!("  Level: {} (Unknown - Index out of bounds)", idx); // Fallback if index invalid
-            current_level_index = None; // Invalidate index if level not found
+            println!("  Level: {} (Unknown - Index out of bounds)", idx);
+            current_level_index = None;
         }
     } else {
-        // This case might happen if root has no levels defined, or task had invalid explicit level
         println!("  Level: Unknown");
     }
     println!("");
 
-    // Print task tree (moved up)
     println!("TASK TREE:");
     print_task_tree(&context.task_tree, 0);
-    println!(""); // Add separation after tree
+    println!("");
 
-    // Print available levels compactly
     println!("AVAILABLE LEVELS (more level information availabe via the `plan` command):");
     let level_summary = context
         .levels
@@ -925,51 +905,43 @@ fn print_distilled_context_response<T>(response: &PlanResponse<T>) {
         .collect::<Vec<_>>()
         .join(" | ");
     println!("  {}", level_summary);
-    println!(""); // Add separation
+    println!("");
 
-    // Print details only for the current level (using the determined index)
     if let Some(idx) = current_level_index {
         if let Some(level) = context.levels.get(idx) {
             println!("CURRENT LEVEL DETAILS (Level {}: {}):", idx, level.name());
             println!("  Focus: {}", level.abstraction_focus());
 
-            // Print a couple of sample questions for the current level
             let questions = level.questions();
             if !questions.is_empty() {
                 println!("  Sample Questions:");
                 for question in questions.iter().take(2) {
-                    // Limit questions shown
                     println!("    • {}", question);
                 }
-                // Indicate if there are more questions
                 if questions.len() > 2 {
                     println!("    • ... and {} more", questions.len() - 2);
                 }
             }
-            println!(""); // Add separation
+            println!("");
         }
     }
 
-    // Print followups and reminder
     if !response.suggested_followups.is_empty() {
         println!("Suggested next steps:");
         for followup in &response.suggested_followups {
             println!("  • {}", followup);
         }
-        println!(""); // Add separation
+        println!("");
     }
 
     if let Some(reminder) = &response.reminder {
         println!("Reminder: {}", reminder);
-        println!(""); // Add separation
+        println!("");
     }
-
-    // Removed final redundant println("")
 }
 
 fn print_task_tree(nodes: &[TaskTreeNode], indent: usize) {
     for node in nodes {
-        // Format the index as a string (e.g., "0.1.2")
         let index_str = node
             .index
             .iter()
@@ -977,28 +949,45 @@ fn print_task_tree(nodes: &[TaskTreeNode], indent: usize) {
             .collect::<Vec<_>>()
             .join(".");
 
-        // Create indentation
         let indent_str = "  ".repeat(indent);
 
-        // Create indicator for current task
         let current_indicator = if node.is_current { "→ " } else { "  " };
 
-        // Create completion status
         let completion_status = if node.completed { "[✓]" } else { "[ ]" };
 
-        // Print the task with appropriate formatting (including index)
         println!(
-            "{}{}{} {} {}", // Format: indent indicator status index description
-            indent_str,
-            current_indicator,
-            completion_status,
-            index_str, // Add the index string here
-            node.description
+            "{}{}{} {} {}",
+            indent_str, current_indicator, completion_status, index_str, node.description
         );
 
-        // Recursively print children with increased indentation
         if !node.children.is_empty() {
             print_task_tree(&node.children, indent + 1);
         }
     }
+}
+
+fn get_plan_id(cli: &Cli) -> Result<PlanId, Box<dyn std::error::Error>> {
+    if let Some(plan_id_val) = cli.plan {
+        // If --plan flag is used (as u8), convert it to PlanId
+        return Ok(PlanId::new(plan_id_val));
+    }
+
+    // Otherwise, check the environment variable
+    let id_str = env::var(PLAN_ID_ENV_VAR).map_err(|_|
+        format!(
+            "Error: Plan ID not specified. Use the --plan=<id> flag or set the {} environment variable (e.g., export {}=<id>). Use 'scatterbrain plan list' to see available IDs.",
+            PLAN_ID_ENV_VAR, PLAN_ID_ENV_VAR
+        )
+    )?;
+
+    // Parse the env var string to u8
+    let id_val = id_str.parse::<u8>().map_err(|e| {
+        format!(
+            "Invalid value in {}: '{}'. Must be a number between 0 and 255. Error: {}",
+            PLAN_ID_ENV_VAR, id_str, e
+        )
+    })?;
+
+    // Convert u8 to PlanId and return
+    Ok(PlanId::new(id_val))
 }
