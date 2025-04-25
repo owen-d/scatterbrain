@@ -25,7 +25,7 @@ lazy_static! {
         "Review code for clarity, maintainability, and potential edge cases.".to_string(),
     ];
     // Define a default Lease value for the initial plan
-    static ref DEFAULT_PLAN_ID: PlanId = Lease(0);
+    pub static ref DEFAULT_PLAN_ID: PlanId = Lease(0);
 }
 
 /// Represents a task in the LLM's work
@@ -1083,7 +1083,7 @@ impl Core {
 
     /// Helper method to safely access a specific plan's context and potentially modify it.
     /// Notifies observers about state changes for the specific plan token.
-    fn with_plan_context<F, R>(&self, id: &PlanId, f: F) -> Result<R, PlanError>
+    pub fn with_plan_context<F, R>(&self, id: &PlanId, f: F) -> Result<R, PlanError>
     where
         F: FnOnce(&mut Context) -> R, // Closure now operates on the specific context
     {

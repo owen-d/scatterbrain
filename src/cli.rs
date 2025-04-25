@@ -8,7 +8,7 @@ use std::io; // Import env module
 
 use crate::{
     api::{serve, Client, ClientConfig, ClientError, ServerConfig},
-    models::{parse_index, Core, Current, PlanId},
+    models::{parse_index, Core, Current, PlanError, PlanId, DEFAULT_PLAN_ID},
 };
 
 // Define the constant here
@@ -169,14 +169,10 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
 
             // Core::new() now initializes the default plan
             let core = Core::new();
-
             // Add example tasks if requested (needs adjustment if Core API changes)
             if *example {
-                println!("Populating default plan with example task tree for UI testing...");
-                // Need to access the default context within core - requires Core modification or different approach
-                // For now, let's skip example population if not easily doable
-                // create_example_tasks(&mut context);
-                eprintln!("Warning: --example flag currently only works if Core struct provides direct access to modify the default context, which may have changed.");
+                println!("Populating with example task tree for UI testing...");
+                create_example_tasks(&core);
             }
 
             // Create a server configuration with the specified port
@@ -936,13 +932,6 @@ fn print_distilled_context_response<T>(response: &crate::models::PlanResponse<T>
 }
 
 fn print_task_tree(_nodes: &[crate::models::TaskTreeNode], _indent: usize) {
-    // ... function body ...
-    // The body of this function was likely removed in a previous edit.
-    // Placeholder implementation to satisfy the compiler for now:
-    // For now, let's assume it should iterate and print.
-    // If the body needs restoration, we can address that.
-    // Example (commented out as it needs actual implementation based on original code):
-    /*
     for node in _nodes {
         let index_str = node
             .index
@@ -964,9 +953,113 @@ fn print_task_tree(_nodes: &[crate::models::TaskTreeNode], _indent: usize) {
             print_task_tree(&node.children, _indent + 1);
         }
     }
-    */
-    // Since the original body might be lost, just leaving it empty for now
-    // to fix the unused variable warning. A proper implementation might be needed.
+}
+
+/// Creates an example task tree for UI testing, operating on the default plan within the Core.
+fn create_example_tasks(core: &Core) {
+    // Access the context for the default plan ID
+    let result: Result<Result<(), PlanError>, PlanError> =
+        core.with_plan_context(&*DEFAULT_PLAN_ID, |context| {
+            // Create top-level tasks (level 0 - Business Strategy)
+            let result = context.add_task("Build Web Application".to_string(), 0);
+            let (_, idx_root) = result.into_inner(); // Keep root index
+            context.move_to(idx_root.clone()).inner();
+
+            // Level 1 - Project Planning
+            let result = context.add_task("Implement Frontend".to_string(), 1);
+            let (_, idx_frontend) = result.into_inner();
+            context.move_to(idx_frontend.clone()).inner();
+
+            // Level 2 - Implementation
+            let result = context.add_task("Design UI Components".to_string(), 2);
+            let (_, idx_ui_components) = result.into_inner();
+            context.move_to(idx_ui_components.clone()).inner();
+
+            // Level 3 - Implementation Details
+            let result = context.add_task("Implement User Authentication UI".to_string(), 3);
+            let (_, idx_auth_ui) = result.into_inner();
+            // -- Complete this task --
+            context
+                .complete_task(idx_auth_ui, None, true, Some("Auth UI done.".to_string()))
+                .inner();
+
+            // Move back up to "Implement Frontend"
+            context.move_to(idx_frontend.clone()).inner();
+
+            // Add another subtask to "Implement Frontend"
+            let result = context.add_task("Set up State Management".to_string(), 2);
+            let (_, idx_state_mgmt) = result.into_inner(); // Keep this index for final cursor
+
+            // Move back to root
+            context.move_to(idx_root.clone()).inner();
+
+            // Add "Implement Backend" as subtask of "Build Web Application"
+            let result = context.add_task("Implement Backend".to_string(), 1);
+            let (_, idx_backend) = result.into_inner();
+            context.move_to(idx_backend.clone()).inner();
+
+            // Add backend tasks
+            let result = context.add_task("Set up Database".to_string(), 2);
+            let (_, idx_db) = result.into_inner();
+            context.move_to(idx_db.clone()).inner();
+
+            // Add some API endpoint tasks
+            let result = context.add_task("Create API Endpoints".to_string(), 3);
+            let (_, idx_api) = result.into_inner();
+            // -- Complete this task --
+            context
+                .complete_task(
+                    idx_api,
+                    None,
+                    true,
+                    Some("Basic CRUD endpoints added.".to_string()),
+                )
+                .inner();
+
+            context
+                .add_task("Implement Authentication Logic".to_string(), 3)
+                .into_inner();
+            context
+                .add_task("Create Data Models".to_string(), 3)
+                .into_inner();
+
+            // Move back to "Set up Database"
+            context.move_to(idx_db.clone()).inner();
+
+            // Add database schema tasks
+            let result = context.add_task("Product Model".to_string(), 3);
+            let (_, idx_prod_model) = result.into_inner();
+            context.move_to(idx_prod_model.clone()).inner();
+
+            // Add some fields
+            context
+                .add_task("Define Product Fields".to_string(), 3)
+                .into_inner();
+            context
+                .add_task("Implement Relationships".to_string(), 3)
+                .into_inner();
+
+            // Move back to root level
+            context.move_to(idx_root.clone()).inner();
+
+            // Add a few more top level tasks
+            context
+                .add_task("Write Documentation".to_string(), 0)
+                .into_inner();
+            context
+                .add_task("Test Application".to_string(), 0)
+                .into_inner();
+
+            // Set final cursor position to the incomplete "Set up State Management" task
+            context.move_to(idx_state_mgmt).inner();
+
+            Ok::<(), PlanError>(()) // Specify the full type for Ok variant
+        });
+
+    // Handle potential error from with_plan_context (e.g., PlanNotFound)
+    if let Err(e) = result {
+        eprintln!("Error creating example tasks: {}", e);
+    }
 }
 
 // Re-add get_plan_id function definition here
