@@ -620,7 +620,7 @@ fn render_ui_template(
             let class = if id == current_plan_id { "active" } else { "" };
             // Use id.value() for the URL and display text
             html.push_str(&format!(
-                "<a href='/ui/{}' class='{}'>Plan {}</a>",
+                "<a href='/ui/{}' class='{}'>Plan {}</a>&nbsp;",
                 id.value(),
                 class,
                 id.value()
