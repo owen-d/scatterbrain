@@ -883,7 +883,7 @@ fn print_distilled_context_response<T>(response: &crate::models::PlanResponse<T>
     }
     println!("\n");
 
-    println!("TASK TREE:");
+    println!("TASK TREE (slim, see `plan show` for full tree):");
     print_task_tree(&context.task_tree, 0);
     println!("\n");
 
@@ -931,7 +931,7 @@ fn print_distilled_context_response<T>(response: &crate::models::PlanResponse<T>
     }
 }
 
-fn print_task_tree(_nodes: &[crate::models::TaskTreeNode], _indent: usize) {
+fn print_task_tree(_nodes: &[crate::models::TaskTreeNode], indent: usize) {
     for node in _nodes {
         let index_str = node
             .index
@@ -940,7 +940,7 @@ fn print_task_tree(_nodes: &[crate::models::TaskTreeNode], _indent: usize) {
             .collect::<Vec<_>>()
             .join(".");
 
-        let indent_str = "  ".repeat(_indent);
+        let indent_str = "  ".repeat(indent);
         let current_indicator = if node.is_current { "→ " } else { "  " };
         let completion_status = if node.completed { "[✓]" } else { "[ ]" };
 
@@ -950,7 +950,7 @@ fn print_task_tree(_nodes: &[crate::models::TaskTreeNode], _indent: usize) {
         );
 
         if !node.children.is_empty() {
-            print_task_tree(&node.children, _indent + 1);
+            print_task_tree(&node.children, indent + 1);
         }
     }
 }

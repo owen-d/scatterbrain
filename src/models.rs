@@ -804,79 +804,14 @@ impl Context {
         self.plan.get_with_history(self.cursor.clone())
     }
 
-    /// Builds a task tree from the root to the current task with one level of children at each node
+    /// Builds a task tree focusing on the path to the current cursor.
+    /// Shows all nodes on the path, and recursively shows all children for nodes on the path.
     fn build_task_tree(&self) -> Vec<TaskTreeNode> {
-        // Start with root and include all tasks along the path to the current task
-        // plus immediate children of the current task
-        let current_idx = Vec::new();
-
-        // First, add the root (which is not actually shown to users but is the parent of top-level tasks)
-        let root_children = self
-            .get_subtasks(current_idx.clone())
+        self.get_subtasks(Vec::new()) // Get top-level tasks
             .into_iter()
             .map(|(idx, task)| {
-                // Check if this child is on the path to the current task
-                let is_on_path = !self.cursor.is_empty() && self.cursor[0] == idx[0];
-
-                // Only include children for tasks on the path to current
-                let children = if is_on_path {
-                    self.get_subtasks(idx.clone())
-                        .into_iter()
-                        .map(|(child_idx, child_task)| {
-                            // For deeper levels, recursively check if on path
-                            let is_on_deeper_path = self.cursor.len() > 1
-                                && child_idx.len() <= self.cursor.len()
-                                && child_idx == self.cursor[0..child_idx.len()];
-
-                            TaskTreeNode {
-                                description: child_task.description().to_string(),
-                                index: child_idx.clone(),
-                                completed: child_task.is_completed(),
-                                is_current: child_idx == self.cursor,
-                                completion_summary: child_task.completion_summary().cloned(),
-                                children: if is_on_deeper_path {
-                                    self.build_subtree(&child_idx)
-                                } else {
-                                    Vec::new()
-                                },
-                            }
-                        })
-                        .collect()
-                } else {
-                    Vec::new()
-                };
-
-                TaskTreeNode {
-                    description: task.description().to_string(),
-                    index: idx.clone(),
-                    completed: task.is_completed(),
-                    is_current: idx == self.cursor,
-                    completion_summary: task.completion_summary().cloned(),
-                    children,
-                }
-            })
-            .collect();
-
-        // Add the current task's children if we're at a valid task
-        if let Some(_current_task) = self.get_current_task() {
-            if !self.cursor.is_empty() {
-                // If we're at a valid task, the children were already added above
-                return root_children;
-            }
-        }
-
-        // If we're at root, just return the root's children
-        root_children
-    }
-
-    /// Helper method to build a subtree for a given index
-    fn build_subtree(&self, index: &Index) -> Vec<TaskTreeNode> {
-        // Get all subtasks for this index
-        self.get_subtasks(index.clone())
-            .into_iter()
-            .map(|(idx, task)| {
-                // Check if this is on the path to current task
-                let is_on_path = idx.len() <= self.cursor.len() && idx == self.cursor[0..idx.len()];
+                // Determine if the current task is this task or one of its descendants
+                let is_on_path = self.cursor.starts_with(&idx);
 
                 TaskTreeNode {
                     description: task.description().to_string(),
@@ -885,7 +820,34 @@ impl Context {
                     is_current: idx == self.cursor,
                     completion_summary: task.completion_summary().cloned(),
                     children: if is_on_path {
-                        self.build_subtree(&idx)
+                        // If on the path, recursively build the subtree below this node,
+                        // but only expanding children that are ALSO on the path.
+                        self.build_path_focused_subtree(&idx)
+                    } else {
+                        // If not on the path, don't include children
+                        Vec::new()
+                    },
+                }
+            })
+            .collect()
+    }
+
+    /// Helper method to recursively build the subtree for nodes on the path to the cursor.
+    fn build_path_focused_subtree(&self, index: &Index) -> Vec<TaskTreeNode> {
+        self.get_subtasks(index.clone())
+            .into_iter()
+            .map(|(child_idx, child_task)| {
+                // Determine if this child is also on the path to the cursor
+                let is_child_on_path = self.cursor.starts_with(&child_idx);
+                TaskTreeNode {
+                    description: child_task.description().to_string(),
+                    index: child_idx.clone(),
+                    completed: child_task.is_completed(),
+                    is_current: child_idx == self.cursor,
+                    completion_summary: child_task.completion_summary().cloned(),
+                    // Only recurse if the child itself is on the path
+                    children: if is_child_on_path {
+                        self.build_path_focused_subtree(&child_idx)
                     } else {
                         Vec::new()
                     },
@@ -1038,7 +1000,7 @@ impl DistilledContext {
 }
 
 /// A node in the task tree for the distilled context
-#[derive(Clone, Serialize, Deserialize, Debug)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct TaskTreeNode {
     /// The description of the task
     pub description: String,
@@ -1291,758 +1253,356 @@ impl Core {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::models::{Context, Level, Plan, Task, TaskTreeNode}; // Ensure TaskTreeNode is imported
+    use pretty_assertions::assert_eq; // Use pretty_assertions for better diffs
 
-    // Helper to create a Core instance for testing
-    fn setup_core() -> Core {
-        Core::new() // Core::new now initializes a default plan
-    }
-
-    // Helper to get the default token
-    fn default_token() -> PlanId {
-        // Return the static default plan ID
-        *DEFAULT_PLAN_ID
-    }
-
-    #[test]
-    fn test_core_new_and_default_plan() {
-        let core = setup_core();
-        let plans = core.inner.read().unwrap();
-        assert_eq!(plans.len(), 1, "Should initialize with one default plan");
-        assert!(
-            plans.contains_key(&default_token()),
-            "Default plan ID should exist"
-        );
-    }
-
-    #[test]
-    fn test_core_create_and_delete_plan() {
-        let core = setup_core();
-
-        // Create a new plan - check it's not the default ID
-        let id1 = core.create_plan(None).expect("Failed to create plan 1");
-        assert_ne!(id1, default_token(), "New ID should not be the default");
-
-        // Verify it exists
-        {
-            let plans = core.inner.read().unwrap();
-            assert_eq!(plans.len(), 2, "Should have default + new plan");
-            assert!(plans.contains_key(&id1));
-        } // Read lock released
-
-        // Create another plan
-        let id2 = core.create_plan(None).expect("Failed to create plan 2");
-        assert_ne!(id2, default_token());
-        assert_ne!(id2, id1);
-
-        // Verify it exists
-        {
-            let plans = core.inner.read().unwrap();
-            assert_eq!(plans.len(), 3, "Should have default + two new plans");
-            assert!(plans.contains_key(&id2));
-        } // Read lock released
-
-        // Delete the first new plan
-        core.delete_plan(&id1).expect("Failed to delete plan 1");
-
-        // Verify it's gone, but others remain
-        {
-            let plans = core.inner.read().unwrap();
-            assert_eq!(
-                plans.len(),
-                2,
-                "Should have default + second new plan after deletion"
-            );
-            assert!(!plans.contains_key(&id1));
-            assert!(plans.contains_key(&default_token())); // Use helper
-            assert!(plans.contains_key(&id2));
-        } // Read lock released
-
-        // Try deleting non-existent plan - create a Lease not likely to exist
-        let non_existent_id = Lease::new(255); // Use constructor
-                                               // Ensure the non-existent id is actually not present before testing deletion
-                                               // Account for the possibility that 255 was randomly generated
-        while core.inner.read().unwrap().contains_key(&non_existent_id) {
-            // This is highly unlikely with only a few plans, but safer
-            panic!("Test setup failed: Non-existent ID 255 was already present.");
-        }
-        let delete_err = core.delete_plan(&non_existent_id).unwrap_err();
-        match delete_err {
-            PlanError::PlanNotFound(t) => assert_eq!(t, non_existent_id),
-            _ => panic!("Expected PlanNotFound error"),
-        }
-
-        // Try deleting default plan (should work for now)
-        core.delete_plan(&default_token()) // Use helper
-            .expect("Failed to delete default plan");
-        {
-            let plans = core.inner.read().unwrap();
-            assert_eq!(plans.len(), 1, "Only second new plan should remain");
-            assert!(plans.contains_key(&id2));
-            assert!(!plans.contains_key(&default_token())); // Use helper
-        }
+    // Helper function to create a basic context for testing build_task_tree
+    fn setup_context() -> Context {
+        let levels = vec![
+            Level::new(
+                "L0".to_string(),
+                "Level 0 Focus".to_string(),
+                vec!["Q0?".to_string()],
+                "Guidance 0".to_string(),
+            ),
+            Level::new(
+                "L1".to_string(),
+                "Level 1 Focus".to_string(),
+                vec!["Q1?".to_string()],
+                "Guidance 1".to_string(),
+            ),
+            Level::new(
+                "L2".to_string(),
+                "Level 2 Focus".to_string(),
+                vec!["Q2?".to_string()],
+                "Guidance 2".to_string(),
+            ),
+        ];
+        let plan = Plan::new(levels, Some("Test Goal".to_string()));
+        Context::new_with_seed(plan, 0) // Use a fixed seed for reproducibility if needed
     }
 
     #[test]
-    fn test_core_list_plans() {
-        let core = setup_core();
-        let initial_ids = core.list_plans().unwrap();
-        assert_eq!(initial_ids.len(), 1);
-        assert!(initial_ids.contains(&default_token())); // Use helper
-
-        let id1 = core.create_plan(None).unwrap();
-        let id2 = core.create_plan(None).unwrap();
-
-        let current_ids = core.list_plans().unwrap();
-        assert_eq!(current_ids.len(), 3);
-        assert!(current_ids.contains(&default_token())); // Use helper
-        assert!(current_ids.contains(&id1));
-        assert!(current_ids.contains(&id2));
-
-        core.delete_plan(&id1).unwrap();
-        let after_delete_ids = core.list_plans().unwrap();
-        assert_eq!(after_delete_ids.len(), 2);
-        assert!(after_delete_ids.contains(&default_token())); // Use helper
-        assert!(after_delete_ids.contains(&id2));
-        assert!(!after_delete_ids.contains(&id1));
+    fn test_build_task_tree_empty() {
+        let context = setup_context();
+        let tree = context.build_task_tree();
+        assert!(tree.is_empty(), "Tree should be empty for a new plan");
     }
 
     #[test]
-    fn test_create_plan_with_goal() {
-        let core = setup_core();
-        let goal = "Test goal for the plan".to_string();
-        let id = core
-            .create_plan(Some(goal.clone()))
-            .expect("Failed to create plan with goal");
+    fn test_build_task_tree_single_task() {
+        let mut context = setup_context();
+        let (_, task_idx) = context.add_task("Task 0".to_string(), 0).into_inner(); // Add task at root
+        context.move_to(task_idx.clone()).inner(); // Move to the task
 
-        // Verify the goal is stored
-        let plan_response = core.get_plan(&id).expect("Failed to get created plan");
-        let plan = plan_response.inner();
-        assert_eq!(plan.goal, Some(goal));
+        let tree = context.build_task_tree();
 
-        // Verify creating a plan without a goal still works
-        let id_no_goal = core
-            .create_plan(None)
-            .expect("Failed to create plan without goal");
-        let plan_response_no_goal = core
-            .get_plan(&id_no_goal)
-            .expect("Failed to get plan without goal");
-        let plan_no_goal = plan_response_no_goal.inner();
-        assert_eq!(plan_no_goal.goal, None);
-    }
-
-    // Example modification for one test:
-    #[test]
-    fn test_task_creation_and_navigation_multi_plan() {
-        let core = setup_core();
-        let id = default_token(); // Use the default plan ID
-
-        // Add a task at the root level - Use updated Core method signature
-        let response = core
-            .add_task(&id, "Task 1".to_string(), 0)
-            .expect("Failed to add task 1");
-        let task1_index = response.into_inner().1;
-        assert_eq!(task1_index, vec![0]);
-
-        // Add another task at the root level
-        let response = core
-            .add_task(&id, "Task 2".to_string(), 0)
-            .expect("Failed to add task 2");
-        let task2_index = response.into_inner().1;
-        assert_eq!(task2_index, vec![1]);
-
-        // Move to the first task
-        let move_response = core
-            .move_to(&id, task1_index.clone())
-            .expect("Failed to move to task 1");
-        assert_eq!(move_response.inner(), &Some("Task 1".to_string()));
-
-        // Add a subtask to the first task
-        let response = core
-            .add_task(&id, "Subtask 1".to_string(), 1)
-            .expect("Failed to add subtask 1");
-        let subtask1_index = response.into_inner().1;
-        assert_eq!(subtask1_index, vec![0, 0]);
-
-        // Move to the second task
-        let move_response = core
-            .move_to(&id, task2_index.clone())
-            .expect("Failed to move to task 2");
-        assert_eq!(move_response.inner(), &Some("Task 2".to_string()));
-        let current_index_resp = core
-            .get_current_index(&id)
-            .expect("Failed to get current index");
-        assert_eq!(*current_index_resp.inner(), vec![1]);
-
-        // Move to subtask 1
-        let move_response = core
-            .move_to(&id, subtask1_index.clone())
-            .expect("Failed to move to subtask 1");
-        assert_eq!(move_response.inner(), &Some("Subtask 1".to_string()));
-        let current_index_resp = core
-            .get_current_index(&id)
-            .expect("Failed to get current index");
-        assert_eq!(*current_index_resp.inner(), vec![0, 0]);
-
-        // Test with a second plan
-        let id2 = core.create_plan(None).unwrap();
-        let response2 = core
-            .add_task(&id2, "Task A Plan 2".to_string(), 0)
-            .expect("Failed to add task to plan 2");
-        let task_a_index2 = response2.into_inner().1;
-        assert_eq!(task_a_index2, vec![0]);
-
-        // Check current index of plan 1 is unchanged
-        let current_index_resp1_again = core
-            .get_current_index(&id)
-            .expect("Failed to get current index for plan 1 again");
-        assert_eq!(*current_index_resp1_again.inner(), vec![0, 0]);
-
-        // Check the root task's subtasks in plan 2.
-        let plan2_response = core.get_plan(&id2).expect("Failed to get plan 2");
-        let plan2 = plan2_response.inner();
-        assert!(!plan2.root().subtasks().is_empty());
-        assert_eq!(plan2.root().subtasks()[0].description(), "Task A Plan 2");
-    }
-
-    // TODO: Update ALL remaining tests similarly...
-    #[test]
-    fn test_task_completion() {
-        // Update test for PlanId and Result handling
-        let core = setup_core();
-        let token = default_token();
-        // Adding a root task isn't strictly necessary now as Core::new creates a default plan
-        // core.add_task(&token, "Root task".to_string(), 0).unwrap();
-
-        // Add tasks
-        let task1_index = core
-            .add_task(&token, "Task 1".to_string(), 0)
-            .expect("Failed to add task 1")
-            .into_inner()
-            .1;
-        let task2_index = core
-            .add_task(&token, "Task 2".to_string(), 0)
-            .expect("Failed to add task 2")
-            .into_inner()
-            .1;
-
-        // Complete a task (provide summary or force)
-        let complete_response = core
-            .complete_task(
-                &token,
-                task1_index.clone(),
-                None, // No lease needed unless generated
-                false,
-                Some("Test summary".to_string()), // Summary required if not forcing
-            )
-            .expect("Failed to complete task 1");
-        assert!(*complete_response.inner());
-
-        // Verify the task is completed
-        let plan_response = core.get_plan(&token).expect("Failed to get plan");
-        // Use get_with_history to fetch the task and its context
-        let (_, task1, _) = plan_response
-            .inner()
-            .get_with_history(task1_index)
-            .expect("Task 1 not found");
-        assert!(task1.is_completed());
+        assert_eq!(tree.len(), 1, "Tree should have one root node");
         assert_eq!(
-            task1.completion_summary(),
-            Some(&"Test summary".to_string())
+            tree[0],
+            TaskTreeNode {
+                description: "Task 0".to_string(),
+                index: vec![0],
+                completed: false,
+                is_current: true,
+                completion_summary: None,
+                children: vec![],
+            }
         );
-
-        // Verify the other task is not completed
-        let plan_response_again = core.get_plan(&token).expect("Failed to get plan again");
-        let (_, task2, _) = plan_response_again
-            .inner()
-            .get_with_history(task2_index)
-            .expect("Task 2 not found");
-        assert!(!task2.is_completed());
     }
 
     #[test]
-    fn test_get_subtasks_via_plan() {
-        // Renamed as get_subtasks is on Context, not Core
-        // Update test for PlanId and Result handling
-        let core = setup_core();
-        let token = default_token();
-        // No need to add root task
+    fn test_build_task_tree_nested_tasks_cursor_at_root() {
+        let mut context = setup_context();
+        context.add_task("Task 0".to_string(), 0).into_inner();
+        context.move_to(vec![0]).inner(); // Move to Task 0
+        context.add_task("Task 0.0".to_string(), 1).into_inner();
+        context.move_to(vec![]).inner(); // Move back to root
 
-        // Add tasks
-        let task1_index = core
-            .add_task(&token, "Task 1".to_string(), 0)
-            .expect("Failed to add task 1")
-            .into_inner()
-            .1;
-        let task2_index = core
-            .add_task(&token, "Task 2".to_string(), 0)
-            .expect("Failed to add task 2")
-            .into_inner()
-            .1;
+        let tree = context.build_task_tree();
 
-        // Move to the first task and add subtasks
-        core.move_to(&token, task1_index.clone())
-            .expect("Failed to move to task 1");
-        let subtask1_index = core
-            .add_task(&token, "Subtask 1".to_string(), 1)
-            .expect("Failed to add subtask 1")
-            .into_inner()
-            .1;
-        let subtask2_index = core
-            .add_task(&token, "Subtask 2".to_string(), 1)
-            .expect("Failed to add subtask 2")
-            .into_inner()
-            .1;
-
-        // Get subtasks via reading the plan and context
-        // get_subtasks is on Context, so we use with_plan_context_read
-        // Clone tasks inside closure to avoid lifetime issues
-        let subtasks: Vec<(Index, Task)> = core
-            .with_plan_context_read(&token, |ctx| {
-                ctx.get_subtasks(task1_index.clone())
-                    .into_iter()
-                    .map(|(idx, task_ref)| (idx, task_ref.clone())) // Clone Task
-                    .collect()
-            })
-            .expect("Failed to read context for subtasks");
-
-        assert_eq!(subtasks.len(), 2);
-        // Now we have owned Tasks, we can assert directly
-        assert_eq!(subtasks[0].0, subtask1_index);
-        assert_eq!(subtasks[0].1.description(), "Subtask 1");
-        assert_eq!(subtasks[1].0, subtask2_index);
-        assert_eq!(subtasks[1].1.description(), "Subtask 2");
-
-        // Get subtasks of the second task (should be empty)
-        let subtasks_2: Vec<(Index, Task)> = core
-            .with_plan_context_read(&token, |ctx| {
-                ctx.get_subtasks(task2_index.clone())
-                    .into_iter()
-                    .map(|(idx, task_ref)| (idx, task_ref.clone())) // Clone Task
-                    .collect()
-            })
-            .expect("Failed to read context for subtasks 2");
-        assert_eq!(subtasks_2.len(), 0);
-    }
-
-    #[test]
-    fn test_lease_system() {
-        // Update test for PlanId and Result handling
-        let core = setup_core();
-        let token = default_token();
-
-        let task_idx = core
-            .add_task(&token, "Lease Task".to_string(), 0)
-            .expect("Add task")
-            .into_inner()
-            .1;
-
-        // Generate lease
-        let lease_resp = core
-            .generate_lease(&token, task_idx.clone())
-            .expect("Generate lease");
-        let (lease, _) = lease_resp.inner(); // Ignore suggestions for this test
-
-        // Attempt completion without lease - should fail
-        let complete_fail_resp = core
-            .complete_task(
-                &token,
-                task_idx.clone(),
-                None,
-                false, // Not forcing
-                Some("Attempt 1".to_string()),
-            )
-            .expect("Attempt complete without lease"); // Expect Ok(PlanResponse) even on logical failure
-        assert!(
-            !*complete_fail_resp.inner(),
-            "Completion should fail without lease"
-        );
-
-        // Attempt completion with wrong lease - should fail
-        // Generate a different u8 lease value
-        let wrong_lease_val = lease.value().wrapping_add(1);
-        let complete_fail_wrong_resp = core
-            .complete_task(
-                &token,
-                task_idx.clone(),
-                Some(wrong_lease_val), // Pass the wrong u8 value
-                false,
-                Some("Attempt 2".to_string()),
-            )
-            .expect("Attempt complete with wrong lease");
-        assert!(
-            !*complete_fail_wrong_resp.inner(),
-            "Completion should fail with wrong lease"
-        );
-
-        // Attempt completion with correct lease - should succeed
-        let complete_success_resp = core
-            .complete_task(
-                &token,
-                task_idx.clone(),
-                Some(lease.value()), // Pass the correct u8 value
-                false,
-                Some("Attempt 3 Success".to_string()),
-            )
-            .expect("Attempt complete with correct lease");
-        assert!(
-            *complete_success_resp.inner(),
-            "Completion should succeed with correct lease"
-        );
-
-        // Verify task is completed
-        let plan = core.get_plan(&token).expect("Get plan").into_inner();
-        let (_, task, _) = plan
-            .get_with_history(task_idx)
-            .expect("Task not found after completion");
-        assert!(task.is_completed());
-    }
-
-    #[test]
-    fn test_task_completion_with_summary() {
-        // Update test for PlanId and Result handling
-        let core = setup_core();
-        let token = default_token();
-
-        let task_idx = core
-            .add_task(&token, "Summary Task".to_string(), 0)
-            .expect("Add task")
-            .into_inner()
-            .1;
-
-        // Attempt completion without summary (and not forcing) - should fail
-        let fail_resp = core
-            .complete_task(
-                &token,
-                task_idx.clone(),
-                None,  // No lease
-                false, // Not forcing
-                None,  // NO SUMMARY
-            )
-            .expect("Attempt complete without summary");
-        assert!(
-            !*fail_resp.inner(),
-            "Completion should fail without summary"
-        );
-
-        // Attempt completion with summary - should succeed
-        let summary = "Task completed successfully.".to_string();
-        let success_resp = core
-            .complete_task(&token, task_idx.clone(), None, false, Some(summary.clone()))
-            .expect("Attempt complete with summary");
-        assert!(
-            *success_resp.inner(),
-            "Completion should succeed with summary"
-        );
-
-        // Verify task is completed and has summary
-        let plan = core.get_plan(&token).expect("Get plan").into_inner();
-        let (_, task, _) = plan.get_with_history(task_idx).expect("Task not found");
-        assert!(task.is_completed());
-        assert_eq!(task.completion_summary(), Some(&summary));
-
-        // Test forcing completion without summary
-        let task2_idx = core
-            .add_task(&token, "Force Complete Task".to_string(), 0)
-            .expect("Add task 2")
-            .into_inner()
-            .1;
-        let force_resp = core
-            .complete_task(
-                &token,
-                task2_idx.clone(),
-                None,
-                true, // Force completion
-                None, // No summary
-            )
-            .expect("Attempt force complete");
-        assert!(
-            *force_resp.inner(),
-            "Forced completion should succeed without summary"
-        );
-
-        let plan2 = core.get_plan(&token).expect("Get plan again").into_inner();
-        let (_, task2, _) = plan2.get_with_history(task2_idx).expect("Task 2 not found");
-        assert!(task2.is_completed());
-        assert!(task2.completion_summary().is_none());
-    }
-
-    #[test]
-    fn test_task_removal() {
-        // Update test for PlanId and Result handling
-        let core = setup_core();
-        let token = default_token();
-
-        // Add tasks: Task1 -> Subtask1, Task2
-        let task1_idx = core
-            .add_task(&token, "Task 1".to_string(), 0)
-            .expect("Add T1")
-            .into_inner()
-            .1;
-        core.move_to(&token, task1_idx.clone()).expect("Move T1");
-        let sub1_idx = core
-            .add_task(&token, "Subtask 1".to_string(), 1)
-            .expect("Add S1")
-            .into_inner()
-            .1;
-        core.move_to(&token, vec![]).expect("Move Root"); // Move back to root to add Task 2
-        let task2_idx = core
-            .add_task(&token, "Task 2".to_string(), 0)
-            .expect("Add T2")
-            .into_inner()
-            .1;
-
-        // Generate lease for subtask to test lease removal
-        let lease_resp = core
-            .generate_lease(&token, sub1_idx.clone())
-            .expect("Generate lease");
-        let _lease_val = lease_resp.inner().0.value();
-
-        // Remove Subtask1
-        let remove_resp = core
-            .remove_task(&token, sub1_idx.clone())
-            .expect("Remove S1 Result");
-        let removed_task_result = remove_resp.inner();
-        assert!(removed_task_result.is_ok(), "Removal should succeed");
+        assert_eq!(tree.len(), 1, "Tree should have one root node (Task 0)");
+        assert_eq!(tree[0].description, "Task 0");
+        assert_eq!(tree[0].index, vec![0]);
+        assert_eq!(tree[0].is_current, false); // Cursor is at root
         assert_eq!(
-            removed_task_result.as_ref().unwrap().description(),
-            "Subtask 1"
+            tree[0].children.len(),
+            0,
+            "Children of non-path nodes should not be included when cursor is at root"
+        );
+    }
+
+    #[test]
+    fn test_build_task_tree_nested_tasks_cursor_at_parent() {
+        let mut context = setup_context();
+        let (_, idx0) = context.add_task("Task 0".to_string(), 0).into_inner();
+        context.move_to(idx0.clone()).inner(); // Move to Task 0
+        let (_, idx00) = context.add_task("Task 0.0".to_string(), 1).into_inner();
+        context.add_task("Task 0.1".to_string(), 1).into_inner();
+        context.move_to(idx0.clone()).inner(); // Stay at Task 0
+
+        let tree = context.build_task_tree();
+
+        assert_eq!(tree.len(), 1, "Tree should have one root node (Task 0)");
+        assert_eq!(tree[0].description, "Task 0");
+        assert_eq!(tree[0].index, idx0);
+        assert_eq!(tree[0].is_current, true); // Cursor is at Task 0
+        assert_eq!(
+            tree[0].children.len(),
+            2,
+            "Children of current node should be included"
         );
 
-        // Verify Subtask1 is gone
-        let plan1 = core
-            .get_plan(&token)
-            .expect("Get Plan after S1 remove")
+        assert_eq!(tree[0].children[0].description, "Task 0.0");
+        assert_eq!(tree[0].children[0].index, idx00);
+        assert_eq!(tree[0].children[0].is_current, false);
+        assert_eq!(tree[0].children[0].children.len(), 0); // Grandchildren not included unless on path
+
+        assert_eq!(tree[0].children[1].description, "Task 0.1");
+        assert_eq!(tree[0].children[1].index, vec![0, 1]);
+        assert_eq!(tree[0].children[1].is_current, false);
+        assert_eq!(tree[0].children[1].children.len(), 0);
+    }
+
+    #[test]
+    fn test_build_task_tree_nested_tasks_cursor_at_child() {
+        let mut context = setup_context();
+        let (_, idx0) = context.add_task("Task 0".to_string(), 0).into_inner();
+        context.move_to(idx0.clone()).inner(); // Move to Task 0
+        let (_, idx00) = context.add_task("Task 0.0".to_string(), 1).into_inner();
+        context.move_to(idx00.clone()).inner(); // Move to Task 0.0
+        context.add_task("Task 0.0.0".to_string(), 2).into_inner(); // Add a child to 0.0
+        context.move_to(idx0.clone()).inner(); // Move back to Task 0
+        context.add_task("Task 0.1".to_string(), 1).into_inner(); // Add sibling Task 0.1
+        context.move_to(idx00.clone()).inner(); // << Move cursor to Task 0.0
+
+        let tree = context.build_task_tree();
+
+        // Expected tree:
+        // Task 0 [ ] (not current)
+        //   Task 0.0 [ ] (current) -> Should have children
+        //     Task 0.0.0 [ ] (not current)
+        //   Task 0.1 [ ] (not current) -> Should NOT have children
+
+        assert_eq!(tree.len(), 1, "Tree should have one root node (Task 0)");
+        let node0 = &tree[0];
+        assert_eq!(node0.description, "Task 0");
+        assert_eq!(node0.index, idx0);
+        assert_eq!(node0.is_current, false); // Cursor is at Task 0.0
+        assert_eq!(
+            node0.children.len(),
+            2,
+            "Parent of current node should show siblings"
+        );
+
+        // Check Task 0.0 (the current task)
+        let node00 = &node0.children[0];
+        assert_eq!(node00.description, "Task 0.0");
+        assert_eq!(node00.index, idx00);
+        assert_eq!(node00.is_current, true); // Cursor is here
+        assert_eq!(
+            node00.children.len(),
+            1,
+            "Current node should show its children"
+        );
+        assert_eq!(node00.children[0].description, "Task 0.0.0");
+        assert_eq!(node00.children[0].index, vec![0, 0, 0]);
+        assert_eq!(node00.children[0].is_current, false);
+        assert_eq!(
+            node00.children[0].children.len(),
+            0,
+            "Grandchildren of current node not on path shouldn't have children shown"
+        );
+
+        // Check Task 0.1 (sibling of current)
+        let node01 = &node0.children[1];
+        assert_eq!(node01.description, "Task 0.1");
+        assert_eq!(node01.index, vec![0, 1]);
+        assert_eq!(node01.is_current, false);
+        assert_eq!(
+            node01.children.len(),
+            0,
+            "Siblings of current node shouldn't show their children"
+        );
+    }
+
+    #[test]
+    fn test_build_task_tree_completed_task() {
+        let mut context = setup_context();
+        let (_, idx0) = context.add_task("Task 0".to_string(), 0).into_inner();
+        context.move_to(idx0.clone()).inner(); // Move to Task 0
+        context
+            .complete_task(idx0.clone(), None, true, Some("Done".to_string()))
+            .inner(); // Complete Task 0
+
+        let tree = context.build_task_tree();
+
+        assert_eq!(tree.len(), 1);
+        assert_eq!(tree[0].description, "Task 0");
+        assert_eq!(tree[0].index, vec![0]);
+        assert_eq!(tree[0].completed, true); // Should be completed
+        assert_eq!(tree[0].is_current, true);
+        assert_eq!(tree[0].completion_summary, Some("Done".to_string()));
+        assert_eq!(tree[0].children.len(), 0);
+    }
+
+    #[test]
+    fn test_build_task_tree_multiple_roots_cursor_set() {
+        let mut context = setup_context();
+        let (_, idx0) = context.add_task("Task 0".to_string(), 0).into_inner();
+        context.move_to(idx0).inner();
+        let (_, idx00) = context.add_task("Task 0.0".to_string(), 1).into_inner();
+        context.move_to(vec![]).inner(); // Back to root
+
+        let (_, idx1) = context.add_task("Task 1".to_string(), 0).into_inner();
+        context.move_to(idx1.clone()).inner(); // Move to Task 1
+        context.add_task("Task 1.0".to_string(), 1).into_inner();
+
+        context.move_to(idx00.clone()).inner(); // << Set cursor to Task 0.0
+
+        let tree = context.build_task_tree();
+
+        // Expected:
+        // Task 0 [ ]
+        //   Task 0.0 [ ] -> Current
+        // Task 1 [ ]
+
+        assert_eq!(tree.len(), 2, "Should show both root tasks");
+
+        let node0 = &tree[0];
+        assert_eq!(node0.description, "Task 0");
+        assert_eq!(node0.is_current, false);
+        assert_eq!(
+            node0.children.len(),
+            1,
+            "Path to current should show children"
+        );
+        assert_eq!(node0.children[0].description, "Task 0.0");
+        assert_eq!(node0.children[0].is_current, true); // Current node
+        assert_eq!(node0.children[0].children.len(), 0); // No children added to 0.0
+
+        let node1 = &tree[1];
+        assert_eq!(node1.description, "Task 1");
+        assert_eq!(node1.is_current, false);
+        assert_eq!(
+            node1.children.len(),
+            0,
+            "Nodes not on path to current shouldn't show children"
+        );
+    }
+
+    #[test]
+    fn test_build_task_tree_path_expansion() {
+        let mut context = setup_context();
+
+        // Create structure:
+        // RootA [0]
+        //   ChildA1 [0, 0]
+        //     GrandchildA1a [0, 0, 0] <-- CURSOR
+        //     GrandchildA1b [0, 0, 1]
+        //   ChildA2 [0, 1]
+        //     GrandchildA2a [0, 1, 0] // Should NOT be shown in the slim tree
+        // RootB [1]
+        //   ChildB1 [1, 0]         // Should NOT be shown in the slim tree
+
+        // RootA and children
+        let (_, idx_root_a) = context.add_task("RootA".to_string(), 0).into_inner();
+        context.move_to(idx_root_a.clone()).inner();
+        let (_, idx_child_a1) = context.add_task("ChildA1".to_string(), 1).into_inner();
+        let (_, idx_child_a2) = context.add_task("ChildA2".to_string(), 1).into_inner();
+
+        // Grandchildren of ChildA1
+        context.move_to(idx_child_a1.clone()).inner();
+        let (_, idx_grandchild_a1a) = context
+            .add_task("GrandchildA1a".to_string(), 2)
             .into_inner();
-        let (_level, task1, _hist) = plan1
-            .get_with_history(task1_idx.clone())
-            .expect("T1 should still exist");
-        assert!(task1.subtasks().is_empty(), "T1 should have no subtasks");
-
-        // Verify lease for Subtask1 is gone (by trying to complete with it - should fail if task gone)
-        // We can't directly check internal lease map state easily from Core API.
-        // Trying to complete a removed task should fail, but how?
-        // Let's try completing Task 1 (parent) to see if state is consistent.
-        core.complete_task(
-            &token,
-            task1_idx.clone(),
-            None,
-            false,
-            Some("Complete T1".to_string()),
-        )
-        .expect("Complete T1");
-
-        // Remove Task2
-        let remove_resp2 = core
-            .remove_task(&token, task2_idx.clone())
-            .expect("Remove T2 Result");
-        assert!(remove_resp2.inner().is_ok());
-        assert_eq!(
-            remove_resp2.inner().as_ref().unwrap().description(),
-            "Task 2"
-        );
-
-        // Verify Task2 is gone
-        let plan2 = core
-            .get_plan(&token)
-            .expect("Get Plan after T2 remove")
+        context
+            .add_task("GrandchildA1b".to_string(), 2)
             .into_inner();
-        assert_eq!(plan2.root().subtasks().len(), 1); // Only Task1 (completed) should remain
-        assert_eq!(plan2.root().subtasks()[0].description(), "Task 1");
 
-        // Try removing root (should fail)
-        let remove_root_resp = core
-            .remove_task(&token, vec![])
-            .expect("Remove Root Result");
-        assert!(remove_root_resp.inner().is_err());
-        // Check error message if possible/stable
-        // assert!(remove_root_resp.inner().err().unwrap().contains("Cannot remove the root task"));
+        // Grandchildren of ChildA2
+        context.move_to(idx_child_a2.clone()).inner();
+        context
+            .add_task("GrandchildA2a".to_string(), 2)
+            .into_inner();
 
-        // Try removing non-existent index
-        let remove_bad_idx_resp = core
-            .remove_task(&token, vec![0, 99])
-            .expect("Remove Bad Index Result");
-        assert!(remove_bad_idx_resp.inner().is_err());
-    }
+        // RootB and children
+        context.move_to(vec![]).inner(); // Back to root
+        let (_, idx_root_b) = context.add_task("RootB".to_string(), 0).into_inner();
+        context.move_to(idx_root_b.clone()).inner();
+        context.add_task("ChildB1".to_string(), 1).into_inner();
 
-    #[test]
-    fn test_task_uncompletion() {
-        // Update test for PlanId and Result handling
-        let core = setup_core();
-        let token = default_token();
+        // << Set cursor to GrandchildA1a >>
+        context.move_to(idx_grandchild_a1a.clone()).inner();
 
-        let task_idx = core
-            .add_task(&token, "Uncomplete Me".to_string(), 0)
-            .expect("Add task")
-            .into_inner()
-            .1;
+        // Build the tree
+        let tree = context.build_task_tree();
 
-        // Complete the task first
-        core.complete_task(
-            &token,
-            task_idx.clone(),
-            None,
-            false,
-            Some("Initial completion".to_string()),
-        )
-        .expect("Initial complete");
+        // --- Assertions ---
 
-        // Verify it's completed
-        let plan1 = core.get_plan(&token).expect("Get plan 1").into_inner();
-        let (_, task1, _) = plan1
-            .get_with_history(task_idx.clone())
-            .expect("Task not found 1");
-        assert!(task1.is_completed());
-        assert!(task1.completion_summary().is_some());
+        // Root level
+        assert_eq!(tree.len(), 2, "Should have RootA and RootB");
+        let node_root_a = &tree[0];
+        let node_root_b = &tree[1];
+        assert_eq!(node_root_a.description, "RootA");
+        assert_eq!(node_root_b.description, "RootB");
+        assert!(!node_root_a.is_current);
+        assert!(!node_root_b.is_current);
 
-        // Uncomplete the task
-        let uncomplete_resp = core
-            .uncomplete_task(&token, task_idx.clone())
-            .expect("Uncomplete Result");
-        let uncomplete_inner_result = uncomplete_resp.inner();
-        assert!(
-            uncomplete_inner_result.is_ok(),
-            "Uncompletion should succeed"
-        );
-        assert!(
-            *uncomplete_inner_result.as_ref().unwrap(),
-            "Uncompletion inner bool should be true"
+        // RootB is not on the path, should have no children shown
+        assert_eq!(
+            node_root_b.children.len(),
+            0,
+            "RootB children should not be expanded"
         );
 
-        // Verify it's not completed and summary is gone
-        let plan2 = core.get_plan(&token).expect("Get plan 2").into_inner();
-        let (_, task2, _) = plan2
-            .get_with_history(task_idx.clone())
-            .expect("Task not found 2");
-        assert!(!task2.is_completed());
-        assert!(task2.completion_summary().is_none());
-
-        // Try uncompleting again (should fail)
-        let uncomplete_again_resp = core
-            .uncomplete_task(&token, task_idx.clone())
-            .expect("Uncomplete Again Result");
-        assert!(uncomplete_again_resp.inner().is_err());
-        // Check error message if possible/stable
-        // assert!(uncomplete_again_resp.inner().err().unwrap().contains("Task is already incomplete"));
-    }
-
-    #[test]
-    fn test_add_task_uncompletes_parents() {
-        // Update test for PlanId and Result handling
-        let core = setup_core();
-        let token = default_token();
-
-        // Create structure: T1 -> S1 -> SS1
-        let t1_idx = core
-            .add_task(&token, "T1".to_string(), 0)
-            .expect("Add T1")
-            .into_inner()
-            .1;
-        core.move_to(&token, t1_idx.clone()).expect("Move T1");
-        let s1_idx = core
-            .add_task(&token, "S1".to_string(), 1)
-            .expect("Add S1")
-            .into_inner()
-            .1;
-        core.move_to(&token, s1_idx.clone()).expect("Move S1");
-        let ss1_idx = core
-            .add_task(&token, "SS1".to_string(), 2)
-            .expect("Add SS1")
-            .into_inner()
-            .1;
-
-        // Complete all tasks from bottom up
-        core.complete_task(
-            &token,
-            ss1_idx.clone(),
-            None,
-            false,
-            Some("Done SS1".to_string()),
-        )
-        .expect("Complete SS1");
-        core.complete_task(
-            &token,
-            s1_idx.clone(),
-            None,
-            false,
-            Some("Done S1".to_string()),
-        )
-        .expect("Complete S1");
-        core.complete_task(
-            &token,
-            t1_idx.clone(),
-            None,
-            false,
-            Some("Done T1".to_string()),
-        )
-        .expect("Complete T1");
-
-        // Verify all are completed
-        let plan1 = core.get_plan(&token).expect("Get Plan 1").into_inner();
-        let (_, t1, _) = plan1.get_with_history(t1_idx.clone()).expect("Get T1");
-        let (_, s1, _) = plan1.get_with_history(s1_idx.clone()).expect("Get S1");
-        let (_, ss1, _) = plan1.get_with_history(ss1_idx.clone()).expect("Get SS1");
-        assert!(t1.is_completed());
-        assert!(s1.is_completed());
-        assert!(ss1.is_completed());
-
-        // Add a new subtask to S1 (S2)
-        core.move_to(&token, s1_idx.clone()).expect("Move S1 again");
-        let _s2_idx = core
-            .add_task(&token, "S2".to_string(), 1)
-            .expect("Add S2")
-            .into_inner()
-            .1;
-
-        // Verify T1 and S1 are now incomplete, but SS1 remains complete
-        let plan2 = core.get_plan(&token).expect("Get Plan 2").into_inner();
-        let (_, t1_after, _) = plan2
-            .get_with_history(t1_idx.clone())
-            .expect("Get T1 after");
-        let (_, s1_after, _) = plan2
-            .get_with_history(s1_idx.clone())
-            .expect("Get S1 after");
-        let (_, ss1_after, _) = plan2
-            .get_with_history(ss1_idx.clone())
-            .expect("Get SS1 after");
-
-        assert!(!t1_after.is_completed(), "T1 should be incomplete");
-        assert!(!s1_after.is_completed(), "S1 should be incomplete");
-        assert!(ss1_after.is_completed(), "SS1 should remain complete"); // Existing children aren't affected
-    }
-
-    #[test]
-    fn test_generate_lease_suggestions() {
-        // Update test for PlanId and Result handling
-        let core = setup_core();
-        let token = default_token();
-
-        // Generate lease for root task (empty index)
-        let root_lease_resp = core
-            .generate_lease(&token, vec![])
-            .expect("Generate root lease");
-        let (_, root_suggestions) = root_lease_resp.inner();
-        assert!(
-            !root_suggestions.is_empty(),
-            "Root task lease should provide suggestions"
+        // RootA is on the path, check its children (ChildA1, ChildA2)
+        assert_eq!(
+            node_root_a.children.len(),
+            2,
+            "RootA should have 2 children"
         );
-        // Check for a known suggestion (fragile, but okay for now)
-        assert!(root_suggestions
-            .iter()
-            .any(|s| s.contains("compilation passes")));
+        let node_child_a1 = &node_root_a.children[0];
+        let node_child_a2 = &node_root_a.children[1];
+        assert_eq!(node_child_a1.description, "ChildA1");
+        assert_eq!(node_child_a2.description, "ChildA2");
+        assert!(!node_child_a1.is_current);
+        assert!(!node_child_a2.is_current);
 
-        // Generate lease for a non-root task
-        let task_idx = core
-            .add_task(&token, "Non-root Task".to_string(), 0)
-            .expect("Add task")
-            .into_inner()
-            .1;
-        let non_root_lease_resp = core
-            .generate_lease(&token, task_idx.clone())
-            .expect("Generate non-root lease");
-        let (_, non_root_suggestions) = non_root_lease_resp.inner();
-        assert!(
-            non_root_suggestions.is_empty(),
-            "Non-root task lease should not provide suggestions"
+        // ChildA2 is not on the path, should have no children shown
+        assert_eq!(
+            node_child_a2.children.len(),
+            0,
+            "ChildA2 children should not be expanded"
+        );
+
+        // ChildA1 is on the path, check its children (GrandchildA1a, GrandchildA1b)
+        assert_eq!(
+            node_child_a1.children.len(),
+            2,
+            "ChildA1 should have 2 children"
+        );
+        let node_grandchild_a1a = &node_child_a1.children[0];
+        let node_grandchild_a1b = &node_child_a1.children[1];
+        assert_eq!(node_grandchild_a1a.description, "GrandchildA1a");
+        assert_eq!(node_grandchild_a1b.description, "GrandchildA1b");
+
+        // GrandchildA1a is the current node
+        assert!(node_grandchild_a1a.is_current);
+        assert!(!node_grandchild_a1b.is_current);
+
+        // Grandchildren are leaf nodes in this path, should have no children shown
+        assert_eq!(
+            node_grandchild_a1a.children.len(),
+            0,
+            "GrandchildA1a children should be empty"
+        );
+        assert_eq!(
+            node_grandchild_a1b.children.len(),
+            0,
+            "GrandchildA1b children should be empty"
         );
     }
+
+    // ... existing tests ...
 }

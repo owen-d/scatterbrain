@@ -32,3 +32,6 @@ path = "src/lib.rs"
 [[bin]]
 name = "scatterbrain"
 path = "src/bin/main.rs"
+
+[dev-dependencies]
+pretty_assertions = "1.4.1"
