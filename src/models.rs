@@ -1030,15 +1030,8 @@ impl Core {
     pub fn new() -> Self {
         // Create a broadcast channel for PlanId updates
         let (tx, _rx) = tokio::sync::broadcast::channel(100);
-
-        // Initialize the map with a default plan context
-        let mut plans = HashMap::new();
-        // Use the static DEFAULT_PLAN_ID for the default plan's context
-        let default_context = Context::default_with_seed(0);
-        plans.insert(*DEFAULT_PLAN_ID, default_context);
-
         Self {
-            inner: Arc::new(RwLock::new(plans)),
+            inner: Arc::new(RwLock::new(HashMap::new())),
             update_tx: Arc::new(tx),
         }
     }
