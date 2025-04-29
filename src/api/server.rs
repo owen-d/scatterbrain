@@ -630,6 +630,15 @@ fn render_ui_template(
     html.push_str("</nav>");
     // --- End Plan Tab Navigation ---
 
+    // --- Display Plan Goal ---
+    if let Some(goal) = &distilled_context.goal {
+        html.push_str(&format!(
+            "<div class='plan-goal'><h2>Goal: {}</h2></div>",
+            goal
+        ));
+    }
+    // --- End Display Plan Goal ---
+
     // Add level legend
     html.push_str("<div class='level-legend'>");
     html.push_str("<h3>Abstraction Levels</h3>");

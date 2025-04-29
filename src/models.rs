@@ -884,6 +884,9 @@ impl Context {
         // Get all levels from the plan
         let levels = self.plan.levels().to_vec();
 
+        // Get the plan's goal
+        let goal = self.plan.goal.clone();
+
         // Create the distilled context with all components using the new constructor
         let distilled = DistilledContext::new(
             usage_summary,
@@ -892,6 +895,7 @@ impl Context {
             current_level,
             levels,
             self.history.iter().cloned().collect(),
+            goal,
         );
 
         PlanResponse::new((), distilled)
@@ -964,6 +968,8 @@ pub struct Current {
 /// Distilled context containing focused information about the current planning state
 #[derive(Clone, Serialize, Deserialize, Debug)]
 pub struct DistilledContext {
+    /// The original goal of the plan, if any.
+    pub goal: Option<String>,
     /// A summary of what scatterbrain is and how to use it
     pub usage_summary: String,
     /// The task tree from root to the current node, plus one level of children
@@ -987,6 +993,7 @@ impl DistilledContext {
         current_level: Option<Level>,
         levels: Vec<Level>,
         transition_history: Vec<TransitionLogEntry>,
+        goal: Option<String>,
     ) -> Self {
         Self {
             usage_summary,
@@ -995,6 +1002,7 @@ impl DistilledContext {
             current_level,
             levels,
             transition_history,
+            goal,
         }
     }
 }
@@ -1245,8 +1253,7 @@ impl Core {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-    use crate::models::{Context, Level, Plan, Task, TaskTreeNode}; // Ensure TaskTreeNode is imported
+    use crate::models::{Context, Level, Plan, TaskTreeNode}; // Ensure TaskTreeNode is imported
     use pretty_assertions::assert_eq; // Use pretty_assertions for better diffs
 
     // Helper function to create a basic context for testing build_task_tree

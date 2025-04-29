@@ -4,7 +4,8 @@
 
 use clap::{CommandFactory, Parser, Subcommand};
 use clap_complete::{generate, Shell};
-use std::io; // Import env module
+use colored::Colorize;
+use std::io; // Import env module // Import the Colorize trait
 
 use crate::{
     api::{serve, Client, ClientConfig, ClientError, ServerConfig},
@@ -815,11 +816,75 @@ fn print_guide() {
 fn print_distilled_context_response<T>(response: &crate::models::PlanResponse<T>) {
     let context = &response.distilled_context;
 
-    println!("\n=== DISTILLED CONTEXT ===\n");
+    println!("\n--- Current Context ---");
 
-    println!("Usage Summary: {}", context.usage_summary);
+    // Find the current node in the tree to get its index string
+    let current_node_opt = find_current_node(&context.task_tree);
+
+    // Print the overall plan goal if it exists
+    if let Some(goal) = &context.goal {
+        println!("Goal: {}", goal.bright_blue());
+    }
+
+    // Current Task/Level Info
+    if let Some(task) = &context.current_task {
+        print!(
+            "Current Task: [{}] {}",
+            current_node_opt.map_or_else(|| "?".to_string(), |node| format_index(&node.index)), // Get index from tree node
+            task.description()
+        );
+        if let Some(level) = task.level_index() {
+            print!(" (level: {})", level);
+        }
+        println!();
+    } else {
+        println!("No current task selected");
+    }
+
+    if let Some(level_info) = &context.current_level {
+        // Find the index of this level in the main levels list
+        let level_index = context
+            .levels
+            .iter()
+            .position(|l| l.name() == level_info.name());
+        if let Some(idx) = level_index {
+            println!(
+                "CURRENT LEVEL DETAILS (Level {}: {}):",
+                idx,
+                level_info.name()
+            );
+            println!("  Focus: {}", level_info.abstraction_focus());
+
+            let questions = level_info.questions();
+            if !questions.is_empty() {
+                println!("  Sample Questions:");
+                for q in questions {
+                    println!("    - {}", q);
+                }
+            }
+
+            println!("  Guidance: {}", level_info.get_guidance());
+        } else {
+            // Fallback if the current_level isn't found in the main list (shouldn't happen)
+            println!(
+                "CURRENT LEVEL DETAILS (Unknown Index: {}):",
+                level_info.name()
+            );
+            println!("  Focus: {}", level_info.abstraction_focus());
+        }
+    } else {
+        // This case handles when there's no specific current task, but we might be at root
+        // or the current task doesn't have an explicit level set.
+        // We rely on context.current_level which should be set even at root.
+        println!(
+            "CURRENT LEVEL DETAILS: No specific level context available for the current task."
+        );
+    }
+
     println!("\n");
 
+    println!("TASK TREE (slim, see `plan show` for full tree):");
+    // Helper function to find the current node recursively
     fn find_current_node(
         nodes: &[crate::models::TaskTreeNode],
     ) -> Option<&crate::models::TaskTreeNode> {
@@ -827,63 +892,12 @@ fn print_distilled_context_response<T>(response: &crate::models::PlanResponse<T>
             if node.is_current {
                 return Some(node);
             }
-            if !node.children.is_empty() {
-                if let Some(found) = find_current_node(&node.children) {
-                    return Some(found);
-                }
+            if let Some(found) = find_current_node(&node.children) {
+                return Some(found);
             }
         }
         None
     }
-
-    println!("CURRENT POSITION:");
-    let mut current_level_index: Option<usize> = None;
-
-    if let Some(current_node) = find_current_node(&context.task_tree) {
-        let index_str = current_node
-            .index
-            .iter()
-            .map(|i| i.to_string())
-            .collect::<Vec<_>>()
-            .join(".");
-        println!(
-            "  Task: \"{}\" {}",
-            current_node.description,
-            if current_node.completed {
-                "[✓]"
-            } else {
-                "[ ]"
-            }
-        );
-        println!("  Index: {}", index_str);
-
-        if let Some(task) = &context.current_task {
-            current_level_index = task.level_index();
-        }
-
-        if current_level_index.is_none() && !current_node.index.is_empty() {
-            current_level_index = Some(current_node.index.len() - 1);
-        }
-    } else {
-        println!("  At root level (no task selected)");
-        if !context.levels.is_empty() {
-            current_level_index = Some(0);
-        }
-    }
-
-    if let Some(idx) = current_level_index {
-        if let Some(level) = context.levels.get(idx) {
-            println!("  Level: {} ({})", idx, level.name());
-        } else {
-            println!("  Level: {} (Unknown - Index out of bounds)", idx);
-            current_level_index = None;
-        }
-    } else {
-        println!("  Level: Unknown");
-    }
-    println!("\n");
-
-    println!("TASK TREE (slim, see `plan show` for full tree):");
     print_task_tree(&context.task_tree, 0);
     println!("\n");
 
@@ -897,25 +911,6 @@ fn print_distilled_context_response<T>(response: &crate::models::PlanResponse<T>
         .join(" | ");
     println!("  {}", level_summary);
     println!("\n");
-
-    if let Some(idx) = current_level_index {
-        if let Some(level) = context.levels.get(idx) {
-            println!("CURRENT LEVEL DETAILS (Level {}: {}):", idx, level.name());
-            println!("  Focus: {}", level.abstraction_focus());
-
-            let questions = level.questions();
-            if !questions.is_empty() {
-                println!("  Sample Questions:");
-                for question in questions.iter().take(2) {
-                    println!("    • {}", question);
-                }
-                if questions.len() > 2 {
-                    println!("    • ... and {} more", questions.len() - 2);
-                }
-            }
-            println!("\n");
-        }
-    }
 
     if !response.suggested_followups.is_empty() {
         println!("Suggested next steps:");
@@ -1087,6 +1082,15 @@ fn get_plan_id(cli: &Cli) -> Result<PlanId, Box<dyn std::error::Error>> {
 
     // Convert u8 to PlanId and return
     Ok(PlanId::new(id_val))
+}
+
+/// Helper function to format an index vector like [0, 1, 2] into "0.1.2"
+fn format_index(index: &[usize]) -> String {
+    index
+        .iter()
+        .map(|i| i.to_string())
+        .collect::<Vec<_>>()
+        .join(".")
 }
 
 #[cfg(test)]
