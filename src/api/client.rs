@@ -13,7 +13,7 @@ use crate::models::{self, Index};
 // Import the request structs from the server module
 use super::server::{
     AddTaskRequest, ChangeLevelRequest, CompleteTaskRequest, CreatePlanRequest, LeaseRequest,
-    MoveToRequest, UncompleteTaskRequest,
+    MoveToRequest, SetTaskNotesRequest, UncompleteTaskRequest,
 };
 
 /// API client configuration
@@ -167,11 +167,13 @@ impl Client {
         id: u8,
         description: String,
         level_index: usize,
+        notes: Option<String>,
     ) -> Result<models::PlanResponse<(models::Task, Index)>, ClientError> {
         let path = format!("/api/plans/{}/task", id);
         let body = AddTaskRequest {
             description,
             level_index,
+            notes,
         };
         self.request(Method::POST, &path, Some(&body)).await
     }
@@ -241,6 +243,53 @@ impl Client {
             .collect::<Vec<_>>()
             .join(",");
         let path = format!("/api/plans/{}/tasks/{}", id, index_str);
+        self.request(Method::DELETE, &path, None::<&()>).await
+    }
+
+    /// Gets the notes for a specific task
+    pub async fn get_task_notes(
+        &self,
+        id: u8,
+        index: Index,
+    ) -> Result<Option<String>, ClientError> {
+        let index_str = index
+            .iter()
+            .map(|i| i.to_string())
+            .collect::<Vec<_>>()
+            .join(",");
+        let path = format!("/api/plans/{}/notes/{}", id, index_str);
+        self.request(Method::GET, &path, None::<&()>).await
+    }
+
+    /// Sets the notes for a specific task
+    pub async fn set_task_notes(
+        &self,
+        id: u8,
+        index: Index,
+        notes: String,
+    ) -> Result<models::PlanResponse<Result<(), String>>, ClientError> {
+        let index_str = index
+            .iter()
+            .map(|i| i.to_string())
+            .collect::<Vec<_>>()
+            .join(",");
+        let path = format!("/api/plans/{}/notes/{}", id, index_str);
+        let body = SetTaskNotesRequest { notes };
+        self.request(Method::POST, &path, Some(&body)).await
+    }
+
+    /// Deletes the notes for a specific task
+    pub async fn delete_task_notes(
+        &self,
+        id: u8,
+        index: Index,
+    ) -> Result<models::PlanResponse<Result<(), String>>, ClientError> {
+        let index_str = index
+            .iter()
+            .map(|i| i.to_string())
+            .collect::<Vec<_>>()
+            .join(",");
+        let path = format!("/api/plans/{}/notes/{}", id, index_str);
         self.request(Method::DELETE, &path, None::<&()>).await
     }
 

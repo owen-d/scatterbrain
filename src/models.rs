@@ -5,6 +5,7 @@
 use chrono::{DateTime, Utc};
 use lazy_static::lazy_static;
 use rand::prelude::*;
+use rand::Rng;
 use rand::SeedableRng;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -36,6 +37,7 @@ pub struct Task {
     subtasks: Vec<Task>,
     level_index: Option<usize>,
     completion_summary: Option<String>,
+    notes: Option<String>,
 }
 
 impl Task {
@@ -47,6 +49,7 @@ impl Task {
             subtasks: Vec::new(),
             level_index: None,
             completion_summary: None,
+            notes: None,
         }
     }
 
@@ -58,6 +61,7 @@ impl Task {
             subtasks: Vec::new(),
             level_index: Some(level_index),
             completion_summary: None,
+            notes: None,
         }
     }
 
@@ -87,6 +91,11 @@ impl Task {
         self.level_index = Some(level_index);
     }
 
+    /// Sets the notes for this task
+    pub(crate) fn set_notes(&mut self, notes: Option<String>) {
+        self.notes = notes;
+    }
+
     /// Gets the description of this task
     pub fn description(&self) -> &str {
         &self.description
@@ -110,6 +119,11 @@ impl Task {
     /// Gets the completion summary if it exists
     pub fn completion_summary(&self) -> Option<&String> {
         self.completion_summary.as_ref()
+    }
+
+    /// Gets the notes if they exist
+    pub fn notes(&self) -> Option<&str> {
+        self.notes.as_deref()
     }
 }
 
@@ -294,7 +308,7 @@ impl Context {
     /// returning the lease and a list of verification suggestions if it's the root task.
     pub fn generate_lease(&mut self, index: Index) -> PlanResponse<(Lease, Vec<String>)> {
         // Generate a u8 lease value using rng
-        let lease_val = self.rng.random::<u8>();
+        let lease_val = self.rng.gen::<u8>();
         let lease = Lease(lease_val);
         self.leases.insert(index.clone(), lease);
 
@@ -328,17 +342,23 @@ impl Context {
         &mut self,
         description: String,
         level_index: usize,
+        notes: Option<String>,
     ) -> PlanResponse<(Task, Index)> {
         self.log_transition(
             "add_task".to_string(),
             Some(format!(
-                "Adding task: '{}' with level {} to parent index {:?}",
-                description, level_index, self.cursor
+                "Adding task: '{}' with level {} (notes: {}) to parent index {:?}",
+                description,
+                level_index,
+                notes.is_some(),
+                self.cursor
             )),
         );
 
-        // Use Task::with_level instead of Task::new
-        let task = Task::with_level(description, level_index);
+        // Use Task::with_level and set notes
+        let mut task = Task::with_level(description, level_index);
+        task.set_notes(notes);
+
         let new_index;
         let task_clone = task.clone();
 
@@ -819,6 +839,7 @@ impl Context {
                     completed: task.is_completed(),
                     is_current: idx == self.cursor,
                     completion_summary: task.completion_summary().cloned(),
+                    notes: task.notes().map(|s| s.to_string()),
                     children: if is_on_path {
                         // If on the path, recursively build the subtree below this node,
                         // but only expanding children that are ALSO on the path.
@@ -845,6 +866,7 @@ impl Context {
                     completed: child_task.is_completed(),
                     is_current: child_idx == self.cursor,
                     completion_summary: child_task.completion_summary().cloned(),
+                    notes: child_task.notes().map(|s| s.to_string()),
                     // Only recurse if the child itself is on the path
                     children: if is_child_on_path {
                         self.build_path_focused_subtree(&child_idx)
@@ -899,6 +921,64 @@ impl Context {
         );
 
         PlanResponse::new((), distilled)
+    }
+
+    /// Sets the notes for the task at the given index.
+    pub fn set_task_notes(
+        &mut self,
+        index: Index,
+        notes: String,
+    ) -> PlanResponse<Result<(), String>> {
+        self.log_transition(
+            "set_task_notes".to_string(),
+            Some(format!("Setting notes for task at index: {:?}", index)),
+        );
+
+        let result = match self.get_task_mut(index.clone()) {
+            Some(task) => {
+                task.set_notes(Some(notes));
+                Ok(())
+            }
+            None => Err(format!("Task not found at index: {:?}", index)),
+        };
+
+        PlanResponse::new(result, self.distilled_context().context())
+    }
+
+    /// Gets the notes for the task at the given index.
+    pub fn get_task_notes(&self, index: Index) -> PlanResponse<Result<Option<String>, String>> {
+        // Log transition *before* getting distilled context if possible,
+        // but here we need the result first to log accurately.
+        let result = match self.get_task(index.clone()) {
+            Some(task) => Ok(task.notes().map(|s| s.to_string())),
+            None => Err(format!("Task not found at index: {:?}", index)),
+        };
+
+        // Log transition after getting the result -- REMOVED because get_task_notes is &self
+        // self.log_transition(
+        //     "get_task_notes".to_string(),
+        //     Some(format!("Getting notes for task at index: {:?}", index))
+        // );
+
+        PlanResponse::new(result, self.distilled_context().context())
+    }
+
+    /// Deletes the notes for the task at the given index.
+    pub fn delete_task_notes(&mut self, index: Index) -> PlanResponse<Result<(), String>> {
+        self.log_transition(
+            "delete_task_notes".to_string(),
+            Some(format!("Deleting notes for task at index: {:?}", index)),
+        );
+
+        let result = match self.get_task_mut(index.clone()) {
+            Some(task) => {
+                task.set_notes(None);
+                Ok(())
+            }
+            None => Err(format!("Task not found at index: {:?}", index)),
+        };
+
+        PlanResponse::new(result, self.distilled_context().context())
     }
 }
 
@@ -1020,6 +1100,8 @@ pub struct TaskTreeNode {
     pub is_current: bool,
     /// Optional completion summary
     pub completion_summary: Option<String>,
+    /// Optional task notes
+    pub notes: Option<String>,
     /// Child tasks (only included for the current task and its ancestors)
     pub children: Vec<TaskTreeNode>,
 }
@@ -1163,8 +1245,11 @@ impl Core {
         id: &PlanId,
         description: String,
         level_index: usize,
+        notes: Option<String>,
     ) -> Result<PlanResponse<(Task, Index)>, PlanError> {
-        self.with_plan_context(id, |context| context.add_task(description, level_index))
+        self.with_plan_context(id, |context| {
+            context.add_task(description, level_index, notes)
+        })
     }
 
     pub fn complete_task(
@@ -1249,11 +1334,40 @@ impl Core {
         let plans = self.inner.read().map_err(|_| PlanError::LockError)?;
         Ok(plans.keys().cloned().collect())
     }
+
+    /// Sets the notes for a specific task within a plan.
+    pub fn set_task_notes(
+        &self,
+        id: &PlanId,
+        index: Index,
+        notes: String,
+    ) -> Result<PlanResponse<Result<(), String>>, PlanError> {
+        self.with_plan_context(id, |context| context.set_task_notes(index, notes))
+    }
+
+    /// Gets the notes for a specific task within a plan.
+    /// Note: Logging is omitted in the Context::get_task_notes to keep it immutable.
+    pub fn get_task_notes(
+        &self,
+        id: &PlanId,
+        index: Index,
+    ) -> Result<PlanResponse<Result<Option<String>, String>>, PlanError> {
+        self.with_plan_context_read(id, |context| context.get_task_notes(index))
+    }
+
+    /// Deletes the notes for a specific task within a plan.
+    pub fn delete_task_notes(
+        &self,
+        id: &PlanId,
+        index: Index,
+    ) -> Result<PlanResponse<Result<(), String>>, PlanError> {
+        self.with_plan_context(id, |context| context.delete_task_notes(index))
+    }
 }
 
 #[cfg(test)]
 mod tests {
-    use crate::models::{Context, Level, Plan, TaskTreeNode}; // Ensure TaskTreeNode is imported
+    use crate::models::{Context, Core, Lease, Level, Plan, PlanError, TaskTreeNode}; // Ensure TaskTreeNode is imported
     use pretty_assertions::assert_eq; // Use pretty_assertions for better diffs
 
     // Helper function to create a basic context for testing build_task_tree
@@ -1292,7 +1406,7 @@ mod tests {
     #[test]
     fn test_build_task_tree_single_task() {
         let mut context = setup_context();
-        let (_, task_idx) = context.add_task("Task 0".to_string(), 0).into_inner(); // Add task at root
+        let (_, task_idx) = context.add_task("Task 0".to_string(), 0, None).into_inner(); // Add task at root
         context.move_to(task_idx.clone()).inner(); // Move to the task
 
         let tree = context.build_task_tree();
@@ -1306,6 +1420,7 @@ mod tests {
                 completed: false,
                 is_current: true,
                 completion_summary: None,
+                notes: None,
                 children: vec![],
             }
         );
@@ -1314,9 +1429,11 @@ mod tests {
     #[test]
     fn test_build_task_tree_nested_tasks_cursor_at_root() {
         let mut context = setup_context();
-        context.add_task("Task 0".to_string(), 0).into_inner();
+        context.add_task("Task 0".to_string(), 0, None).into_inner();
         context.move_to(vec![0]).inner(); // Move to Task 0
-        context.add_task("Task 0.0".to_string(), 1).into_inner();
+        context
+            .add_task("Task 0.0".to_string(), 1, None)
+            .into_inner();
         context.move_to(vec![]).inner(); // Move back to root
 
         let tree = context.build_task_tree();
@@ -1335,10 +1452,14 @@ mod tests {
     #[test]
     fn test_build_task_tree_nested_tasks_cursor_at_parent() {
         let mut context = setup_context();
-        let (_, idx0) = context.add_task("Task 0".to_string(), 0).into_inner();
+        let (_, idx0) = context.add_task("Task 0".to_string(), 0, None).into_inner();
         context.move_to(idx0.clone()).inner(); // Move to Task 0
-        let (_, idx00) = context.add_task("Task 0.0".to_string(), 1).into_inner();
-        context.add_task("Task 0.1".to_string(), 1).into_inner();
+        let (_, idx00) = context
+            .add_task("Task 0.0".to_string(), 1, None)
+            .into_inner();
+        context
+            .add_task("Task 0.1".to_string(), 1, None)
+            .into_inner();
         context.move_to(idx0.clone()).inner(); // Stay at Task 0
 
         let tree = context.build_task_tree();
@@ -1367,13 +1488,19 @@ mod tests {
     #[test]
     fn test_build_task_tree_nested_tasks_cursor_at_child() {
         let mut context = setup_context();
-        let (_, idx0) = context.add_task("Task 0".to_string(), 0).into_inner();
+        let (_, idx0) = context.add_task("Task 0".to_string(), 0, None).into_inner();
         context.move_to(idx0.clone()).inner(); // Move to Task 0
-        let (_, idx00) = context.add_task("Task 0.0".to_string(), 1).into_inner();
+        let (_, idx00) = context
+            .add_task("Task 0.0".to_string(), 1, None)
+            .into_inner();
         context.move_to(idx00.clone()).inner(); // Move to Task 0.0
-        context.add_task("Task 0.0.0".to_string(), 2).into_inner(); // Add a child to 0.0
+        context
+            .add_task("Task 0.0.0".to_string(), 2, None)
+            .into_inner(); // Add a child to 0.0
         context.move_to(idx0.clone()).inner(); // Move back to Task 0
-        context.add_task("Task 0.1".to_string(), 1).into_inner(); // Add sibling Task 0.1
+        context
+            .add_task("Task 0.1".to_string(), 1, None)
+            .into_inner(); // Add sibling Task 0.1
         context.move_to(idx00.clone()).inner(); // << Move cursor to Task 0.0
 
         let tree = context.build_task_tree();
@@ -1408,11 +1535,8 @@ mod tests {
         assert_eq!(node00.children[0].description, "Task 0.0.0");
         assert_eq!(node00.children[0].index, vec![0, 0, 0]);
         assert_eq!(node00.children[0].is_current, false);
-        assert_eq!(
-            node00.children[0].children.len(),
-            0,
-            "Grandchildren of current node not on path shouldn't have children shown"
-        );
+        assert_eq!(node00.children[0].children.len(), 0); // No children added to 0.0
+        assert_eq!(node00.notes, None); // Check notes are None initially
 
         // Check Task 0.1 (sibling of current)
         let node01 = &node0.children[1];
@@ -1429,7 +1553,7 @@ mod tests {
     #[test]
     fn test_build_task_tree_completed_task() {
         let mut context = setup_context();
-        let (_, idx0) = context.add_task("Task 0".to_string(), 0).into_inner();
+        let (_, idx0) = context.add_task("Task 0".to_string(), 0, None).into_inner();
         context.move_to(idx0.clone()).inner(); // Move to Task 0
         context
             .complete_task(idx0.clone(), None, true, Some("Done".to_string()))
@@ -1449,14 +1573,18 @@ mod tests {
     #[test]
     fn test_build_task_tree_multiple_roots_cursor_set() {
         let mut context = setup_context();
-        let (_, idx0) = context.add_task("Task 0".to_string(), 0).into_inner();
+        let (_, idx0) = context.add_task("Task 0".to_string(), 0, None).into_inner();
         context.move_to(idx0).inner();
-        let (_, idx00) = context.add_task("Task 0.0".to_string(), 1).into_inner();
+        let (_, idx00) = context
+            .add_task("Task 0.0".to_string(), 1, None)
+            .into_inner();
         context.move_to(vec![]).inner(); // Back to root
 
-        let (_, idx1) = context.add_task("Task 1".to_string(), 0).into_inner();
+        let (_, idx1) = context.add_task("Task 1".to_string(), 0, None).into_inner();
         context.move_to(idx1.clone()).inner(); // Move to Task 1
-        context.add_task("Task 1.0".to_string(), 1).into_inner();
+        context
+            .add_task("Task 1.0".to_string(), 1, None)
+            .into_inner();
 
         context.move_to(idx00.clone()).inner(); // << Set cursor to Task 0.0
 
@@ -1506,31 +1634,37 @@ mod tests {
         //   ChildB1 [1, 0]         // Should NOT be shown in the slim tree
 
         // RootA and children
-        let (_, idx_root_a) = context.add_task("RootA".to_string(), 0).into_inner();
+        let (_, idx_root_a) = context.add_task("RootA".to_string(), 0, None).into_inner();
         context.move_to(idx_root_a.clone()).inner();
-        let (_, idx_child_a1) = context.add_task("ChildA1".to_string(), 1).into_inner();
-        let (_, idx_child_a2) = context.add_task("ChildA2".to_string(), 1).into_inner();
+        let (_, idx_child_a1) = context
+            .add_task("ChildA1".to_string(), 1, None)
+            .into_inner();
+        let (_, idx_child_a2) = context
+            .add_task("ChildA2".to_string(), 1, None)
+            .into_inner();
 
         // Grandchildren of ChildA1
         context.move_to(idx_child_a1.clone()).inner();
         let (_, idx_grandchild_a1a) = context
-            .add_task("GrandchildA1a".to_string(), 2)
+            .add_task("GrandchildA1a".to_string(), 2, None)
             .into_inner();
         context
-            .add_task("GrandchildA1b".to_string(), 2)
+            .add_task("GrandchildA1b".to_string(), 2, None)
             .into_inner();
 
         // Grandchildren of ChildA2
         context.move_to(idx_child_a2.clone()).inner();
         context
-            .add_task("GrandchildA2a".to_string(), 2)
+            .add_task("GrandchildA2a".to_string(), 2, None)
             .into_inner();
 
         // RootB and children
         context.move_to(vec![]).inner(); // Back to root
-        let (_, idx_root_b) = context.add_task("RootB".to_string(), 0).into_inner();
+        let (_, idx_root_b) = context.add_task("RootB".to_string(), 0, None).into_inner();
         context.move_to(idx_root_b.clone()).inner();
-        context.add_task("ChildB1".to_string(), 1).into_inner();
+        context
+            .add_task("ChildB1".to_string(), 1, None)
+            .into_inner();
 
         // << Set cursor to GrandchildA1a >>
         context.move_to(idx_grandchild_a1a.clone()).inner();
@@ -1602,6 +1736,106 @@ mod tests {
             0,
             "GrandchildA1b children should be empty"
         );
+        assert_eq!(node_grandchild_a1a.notes, None); // Check notes initially
+        assert_eq!(node_grandchild_a1b.notes, None); // Check notes initially
+    }
+
+    #[test]
+    fn test_core_notes_crud() {
+        let core = Core::new();
+        let plan_id = core.create_plan(Some("Test Plan".to_string())).unwrap();
+
+        // 1. Add a task (initially no notes)
+        let (_, task_index) = core
+            .add_task(&plan_id, "Task with notes".to_string(), 0, None)
+            .unwrap()
+            .into_inner();
+        assert_eq!(task_index, vec![0]);
+
+        // 2. Get notes (should be None)
+        let notes_response = core.get_task_notes(&plan_id, task_index.clone()).unwrap();
+        assert_eq!(notes_response.into_inner().unwrap(), None);
+
+        // 3. Set notes
+        let set_response = core
+            .set_task_notes(
+                &plan_id,
+                task_index.clone(),
+                "These are my notes".to_string(),
+            )
+            .unwrap();
+        assert!(set_response.into_inner().is_ok());
+
+        // 4. Get notes (should have value)
+        let notes_response = core.get_task_notes(&plan_id, task_index.clone()).unwrap();
+        assert_eq!(
+            notes_response.into_inner().unwrap(),
+            Some("These are my notes".to_string())
+        );
+
+        // 5. Verify notes in TaskTreeNode within distilled_context
+        let distilled_resp = core.distilled_context(&plan_id).unwrap();
+        let distilled = distilled_resp.context();
+        assert_eq!(distilled.task_tree.len(), 1);
+        assert_eq!(
+            distilled.task_tree[0].notes,
+            Some("These are my notes".to_string())
+        );
+
+        // 6. Delete notes
+        let delete_response = core
+            .delete_task_notes(&plan_id, task_index.clone())
+            .unwrap();
+        assert!(delete_response.into_inner().is_ok());
+
+        // 7. Get notes (should be None again)
+        let notes_response = core.get_task_notes(&plan_id, task_index.clone()).unwrap();
+        assert_eq!(notes_response.into_inner().unwrap(), None);
+
+        // 8. Add a task *with* notes initially
+        let (_, task_index_2) = core
+            .add_task(
+                &plan_id,
+                "Task initially with notes".to_string(),
+                0,
+                Some("Initial notes".to_string()),
+            )
+            .unwrap()
+            .into_inner();
+        assert_eq!(task_index_2, vec![1]);
+        let notes_response_2 = core.get_task_notes(&plan_id, task_index_2.clone()).unwrap();
+        assert_eq!(
+            notes_response_2.into_inner().unwrap(),
+            Some("Initial notes".to_string())
+        );
+
+        // Test error cases
+        let bad_index = vec![99];
+        let get_err = core
+            .get_task_notes(&plan_id, bad_index.clone())
+            .unwrap()
+            .into_inner();
+        assert!(get_err.is_err());
+        assert!(get_err.unwrap_err().contains("Task not found"));
+
+        let set_err = core
+            .set_task_notes(&plan_id, bad_index.clone(), "fail".to_string())
+            .unwrap()
+            .into_inner();
+        assert!(set_err.is_err());
+        assert!(set_err.unwrap_err().contains("Task not found"));
+
+        let delete_err = core
+            .delete_task_notes(&plan_id, bad_index.clone())
+            .unwrap()
+            .into_inner();
+        assert!(delete_err.is_err());
+        assert!(delete_err.unwrap_err().contains("Task not found"));
+
+        // Test PlanNotFound error
+        let bad_plan_id = Lease::new(99); // Assuming 99 is unlikely to be generated
+        let get_plan_err = core.get_task_notes(&bad_plan_id, task_index.clone());
+        assert!(matches!(get_plan_err, Err(PlanError::PlanNotFound(_))));
     }
 
     // ... existing tests ...

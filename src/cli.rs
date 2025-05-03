@@ -86,6 +86,10 @@ enum TaskCommands {
         /// Level index (starting from 0, lower index = higher abstraction level)
         #[arg(short, long)]
         level: usize,
+
+        /// Optional notes for the task
+        #[arg(long)]
+        notes: Option<String>,
     },
 
     /// Complete the current task or the task at the specified index
@@ -129,6 +133,34 @@ enum TaskCommands {
 
     /// Uncomplete a task by its index
     Uncomplete {
+        /// Task index (e.g., 0 or 0,1,2 for nested tasks)
+        index: String,
+    },
+
+    /// Manage notes for a specific task
+    Notes {
+        #[command(subcommand)]
+        command: TaskNotesSubcommand,
+    },
+}
+
+// Define TaskNotesSubcommand Enum
+#[derive(Subcommand)]
+enum TaskNotesSubcommand {
+    /// View notes for a task
+    View {
+        /// Task index (e.g., 0 or 0,1,2 for nested tasks)
+        index: String,
+    },
+    /// Set notes for a task
+    Set {
+        /// Task index (e.g., 0 or 0,1,2 for nested tasks)
+        index: String,
+        /// The notes content
+        notes: String,
+    },
+    /// Delete notes for a task
+    Delete {
         /// Task index (e.g., 0 or 0,1,2 for nested tasks)
         index: String,
     },
@@ -191,10 +223,14 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
             let id = get_plan_id(&cli)?; // id is PlanId
 
             let result = match command {
-                TaskCommands::Add { description, level } => {
-                    // Pass id.value() to client method
+                TaskCommands::Add {
+                    description,
+                    level,
+                    notes,
+                } => {
+                    // Pass id.value() and notes.clone() to client method
                     let response = client
-                        .add_task(id.value(), description.clone(), *level)
+                        .add_task(id.value(), description.clone(), *level, notes.clone())
                         .await?;
                     let (_task, index) = response.inner();
                     println!(
@@ -327,6 +363,60 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
                         }
                     };
                     Ok(())
+                }
+
+                TaskCommands::Notes { command } => {
+                    match command {
+                        TaskNotesSubcommand::View { index } => {
+                            let parsed_index = parse_index(index)?;
+                            // Call client.get_task_notes directly
+                            match client.get_task_notes(id.value(), parsed_index).await {
+                                Ok(notes_opt) => {
+                                    if let Some(notes) = notes_opt {
+                                        println!("Notes for task at index {}:\n{}", index, notes);
+                                    } else {
+                                        println!("No notes found for task at index {}.", index);
+                                    }
+                                }
+                                Err(e) => {
+                                    eprintln!("Error getting notes: {}", e);
+                                }
+                            }
+                            Ok(())
+                        }
+                        TaskNotesSubcommand::Set { index, notes } => {
+                            let parsed_index = parse_index(index)?;
+                            let response = client
+                                .set_task_notes(id.value(), parsed_index, notes.clone())
+                                .await?;
+                            // Handle the Result<(), String> within PlanResponse
+                            print_response(&response, |res| match res {
+                                Ok(_) => {
+                                    println!("Notes for task at index {} set successfully.", index)
+                                }
+                                Err(e) => {
+                                    eprintln!("Error setting notes for task {}: {}", index, e)
+                                }
+                            });
+                            Ok(())
+                        }
+                        TaskNotesSubcommand::Delete { index } => {
+                            let parsed_index = parse_index(index)?;
+                            let response =
+                                client.delete_task_notes(id.value(), parsed_index).await?;
+                            // Handle the Result<(), String> within PlanResponse
+                            print_response(&response, |res| match res {
+                                Ok(_) => println!(
+                                    "Notes for task at index {} deleted successfully.",
+                                    index
+                                ),
+                                Err(e) => {
+                                    eprintln!("Error deleting notes for task {}: {}", index, e)
+                                }
+                            });
+                            Ok(())
+                        }
+                    }
                 }
             };
             result
@@ -569,6 +659,16 @@ fn print_task(task: &crate::models::Task, index: Vec<usize>) {
         task.is_completed()
     );
 
+    // Print notes if they exist
+    if let Some(notes) = task.notes() {
+        let notes_indent = "  ".repeat(index.len() + 1); // Extra indent for notes
+        println!(
+            "{}{}",
+            notes_indent,
+            notes.replace('\n', &format!("\n{}", notes_indent))
+        ); // Indent multi-line notes
+    }
+
     for (i, subtask) in task.subtasks().iter().enumerate() {
         let mut subtask_index = index.clone();
         subtask_index.push(i);
@@ -745,13 +845,16 @@ PLAN MANAGEMENT (scatterbrain plan ...):
   $ scatterbrain plan show                               View the full plan with all tasks
 
 TASK MANAGEMENT (scatterbrain task ...):
-  $ scatterbrain task add --level <LEVEL> \"Description\"  Create new task (level required)
+  $ scatterbrain task add --level <LEVEL> [--notes <TEXT>] "Description" Create new task (level required, notes optional)
                                                          Note: Adding a subtask marks parents incomplete.
   $ scatterbrain task complete --index <INDEX> [--lease <ID>] [--force] [--summary <TEXT>] Complete task at specified index (summary required unless --force)
   $ scatterbrain task change-level <LEVEL_INDEX>         Change current task's abstraction level
   $ scatterbrain task lease <INDEX>                      Generate a lease for a task
   $ scatterbrain task remove <INDEX>                     Remove a task by its index (e.g., 0,1,2)
   $ scatterbrain task uncomplete <INDEX>                 Uncomplete a task by its index
+  $ scatterbrain task notes view <INDEX>                 View notes for a specific task
+  $ scatterbrain task notes set <INDEX> "<NOTES>"        Set notes for a specific task
+  $ scatterbrain task notes delete <INDEX>               Delete notes for a specific task
 
 NAVIGATION & VIEWING (scatterbrain ...):
   $ scatterbrain move <INDEX>                            Navigate to a task (e.g., 0 or 0,1,2)
@@ -793,7 +896,6 @@ COMMON MISTAKES TO AVOID:
   • Neglecting to validate: Assuming completed tasks are correct
   • Over-complicating: Adding unnecessary complexity to the plan
   • Under-planning: Skipping important steps in the planning process
-
 "#,
         PLAN_ID_ENV_VAR, // 1. For 'export {}=42' example (line ~606)
         PLAN_ID_ENV_VAR, // 2. For 'export {}={}' explanation (line ~615a)
@@ -944,6 +1046,16 @@ fn print_task_tree(_nodes: &[crate::models::TaskTreeNode], indent: usize) {
             indent_str, current_indicator, completion_status, index_str, node.description
         );
 
+        // Print notes if they exist
+        if let Some(notes) = &node.notes {
+            let notes_indent = "  ".repeat(indent + 1); // Extra indent for notes
+            println!(
+                "{}> {}",
+                notes_indent,
+                notes.replace('\n', &format!("\n{}> ", notes_indent))
+            ); // Indent multi-line notes
+        }
+
         if !node.children.is_empty() {
             print_task_tree(&node.children, indent + 1);
         }
@@ -956,22 +1068,22 @@ fn create_example_tasks(core: &Core) {
     let result: Result<Result<(), PlanError>, PlanError> =
         core.with_plan_context(&*DEFAULT_PLAN_ID, |context| {
             // Create top-level tasks (level 0 - Business Strategy)
-            let result = context.add_task("Build Web Application".to_string(), 0);
+            let result = context.add_task("Build Web Application".to_string(), 0, None);
             let (_, idx_root) = result.into_inner(); // Keep root index
             context.move_to(idx_root.clone()).inner();
 
             // Level 1 - Project Planning
-            let result = context.add_task("Implement Frontend".to_string(), 1);
+            let result = context.add_task("Implement Frontend".to_string(), 1, None);
             let (_, idx_frontend) = result.into_inner();
             context.move_to(idx_frontend.clone()).inner();
 
             // Level 2 - Implementation
-            let result = context.add_task("Design UI Components".to_string(), 2);
+            let result = context.add_task("Design UI Components".to_string(), 2, None);
             let (_, idx_ui_components) = result.into_inner();
             context.move_to(idx_ui_components.clone()).inner();
 
             // Level 3 - Implementation Details
-            let result = context.add_task("Implement User Authentication UI".to_string(), 3);
+            let result = context.add_task("Implement User Authentication UI".to_string(), 3, None);
             let (_, idx_auth_ui) = result.into_inner();
             // -- Complete this task --
             context
@@ -982,24 +1094,24 @@ fn create_example_tasks(core: &Core) {
             context.move_to(idx_frontend.clone()).inner();
 
             // Add another subtask to "Implement Frontend"
-            let result = context.add_task("Set up State Management".to_string(), 2);
+            let result = context.add_task("Set up State Management".to_string(), 2, None);
             let (_, idx_state_mgmt) = result.into_inner(); // Keep this index for final cursor
 
             // Move back to root
             context.move_to(idx_root.clone()).inner();
 
             // Add "Implement Backend" as subtask of "Build Web Application"
-            let result = context.add_task("Implement Backend".to_string(), 1);
+            let result = context.add_task("Implement Backend".to_string(), 1, None);
             let (_, idx_backend) = result.into_inner();
             context.move_to(idx_backend.clone()).inner();
 
             // Add backend tasks
-            let result = context.add_task("Set up Database".to_string(), 2);
+            let result = context.add_task("Set up Database".to_string(), 2, None);
             let (_, idx_db) = result.into_inner();
             context.move_to(idx_db.clone()).inner();
 
             // Add some API endpoint tasks
-            let result = context.add_task("Create API Endpoints".to_string(), 3);
+            let result = context.add_task("Create API Endpoints".to_string(), 3, None);
             let (_, idx_api) = result.into_inner();
             // -- Complete this task --
             context
@@ -1012,26 +1124,26 @@ fn create_example_tasks(core: &Core) {
                 .inner();
 
             context
-                .add_task("Implement Authentication Logic".to_string(), 3)
+                .add_task("Implement Authentication Logic".to_string(), 3, None)
                 .into_inner();
             context
-                .add_task("Create Data Models".to_string(), 3)
+                .add_task("Create Data Models".to_string(), 3, None)
                 .into_inner();
 
             // Move back to "Set up Database"
             context.move_to(idx_db.clone()).inner();
 
             // Add database schema tasks
-            let result = context.add_task("Product Model".to_string(), 3);
+            let result = context.add_task("Product Model".to_string(), 3, None);
             let (_, idx_prod_model) = result.into_inner();
             context.move_to(idx_prod_model.clone()).inner();
 
             // Add some fields
             context
-                .add_task("Define Product Fields".to_string(), 3)
+                .add_task("Define Product Fields".to_string(), 3, None)
                 .into_inner();
             context
-                .add_task("Implement Relationships".to_string(), 3)
+                .add_task("Implement Relationships".to_string(), 3, None)
                 .into_inner();
 
             // Move back to root level
@@ -1039,10 +1151,10 @@ fn create_example_tasks(core: &Core) {
 
             // Add a few more top level tasks
             context
-                .add_task("Write Documentation".to_string(), 0)
+                .add_task("Write Documentation".to_string(), 0, None)
                 .into_inner();
             context
-                .add_task("Test Application".to_string(), 0)
+                .add_task("Test Application".to_string(), 0, None)
                 .into_inner();
 
             // Set final cursor position to the incomplete "Set up State Management" task
@@ -1096,6 +1208,8 @@ fn format_index(index: &[usize]) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use clap::Parser;
+    use pretty_assertions::assert_eq;
 
     #[test]
     fn test_get_guide_string_formatting() {
@@ -1132,15 +1246,97 @@ mod tests {
         // This is implicitly tested by the format! macro itself, but we check key instances.
     }
 
-    // Add more tests for CLI parsing if needed, e.g.:
-    // #[test]
-    // fn test_parse_plan_create() {
-    //     let args = Cli::try_parse_from(["scatterbrain", "plan", "create", "My Test Prompt"]).unwrap();
-    //     match args.command {
-    //         Commands::PlanCmd(PlanCommands::Create { prompt }) => {
-    //             assert_eq!(prompt, "My Test Prompt");
-    //         }
-    //         _ => panic!("Expected PlanCommands::Create"),
-    //     }
-    // }
+    // Helper function to parse CLI args for testing
+    fn try_parse_args(args: &[&str]) -> Result<Cli, clap::error::Error> {
+        Cli::try_parse_from(args)
+    }
+
+    #[test]
+    fn test_cli_task_notes_parsing() {
+        // Test task add with notes
+        let args_add = vec![
+            "scatterbrain",
+            "task",
+            "add",
+            "New task desc",
+            "--level",
+            "0",
+            "--notes",
+            "Some notes here",
+        ];
+        let cli_add = try_parse_args(&args_add).unwrap();
+        match cli_add.command {
+            Commands::Task { command } => match command {
+                TaskCommands::Add {
+                    description,
+                    level,
+                    notes,
+                } => {
+                    assert_eq!(description, "New task desc");
+                    assert_eq!(level, 0);
+                    assert_eq!(notes, Some("Some notes here".to_string()));
+                }
+                _ => panic!("Expected TaskCommands::Add"),
+            },
+            _ => panic!("Expected Commands::Task"),
+        }
+
+        // Test task notes view
+        let args_view = vec!["scatterbrain", "task", "notes", "view", "0,1"];
+        let cli_view = try_parse_args(&args_view).unwrap();
+        match cli_view.command {
+            Commands::Task { command } => match command {
+                TaskCommands::Notes { command: notes_cmd } => match notes_cmd {
+                    TaskNotesSubcommand::View { index } => {
+                        assert_eq!(index, "0,1");
+                    }
+                    _ => panic!("Expected TaskNotesSubcommand::View"),
+                },
+                _ => panic!("Expected TaskCommands::Notes"),
+            },
+            _ => panic!("Expected Commands::Task"),
+        }
+
+        // Test task notes set
+        let args_set = vec![
+            "scatterbrain",
+            "task",
+            "notes",
+            "set",
+            "1",
+            "New notes content",
+        ];
+        let cli_set = try_parse_args(&args_set).unwrap();
+        match cli_set.command {
+            Commands::Task { command } => match command {
+                TaskCommands::Notes { command: notes_cmd } => match notes_cmd {
+                    TaskNotesSubcommand::Set { index, notes } => {
+                        assert_eq!(index, "1");
+                        assert_eq!(notes, "New notes content");
+                    }
+                    _ => panic!("Expected TaskNotesSubcommand::Set"),
+                },
+                _ => panic!("Expected TaskCommands::Notes"),
+            },
+            _ => panic!("Expected Commands::Task"),
+        }
+
+        // Test task notes delete
+        let args_delete = vec!["scatterbrain", "task", "notes", "delete", "0,0,0"];
+        let cli_delete = try_parse_args(&args_delete).unwrap();
+        match cli_delete.command {
+            Commands::Task { command } => match command {
+                TaskCommands::Notes { command: notes_cmd } => match notes_cmd {
+                    TaskNotesSubcommand::Delete { index } => {
+                        assert_eq!(index, "0,0,0");
+                    }
+                    _ => panic!("Expected TaskNotesSubcommand::Delete"),
+                },
+                _ => panic!("Expected TaskCommands::Notes"),
+            },
+            _ => panic!("Expected Commands::Task"),
+        }
+    }
+
+    // TODO: Add tests for CLI handler logic (requires mocking Client or test server)
 }

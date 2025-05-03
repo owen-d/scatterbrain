@@ -9,19 +9,19 @@ leptos = { workspace = true }
 serde = { workspace = true, features = ["derive"] }
 penpen-tea = { path = "../penpen-tea" }
 serde_json.workspace = true
-axum = { version = "0.7" }
+axum = "0.7.5"
 tower-http = { version = "0.5", features = ["cors", "trace"] }
-tokio = { version = "1", features = ["full"] }
-tracing = "0.1"
-tracing-subscriber = { version = "0.3", features = ["env-filter"] }
-reqwest = { version = "0.11", features = ["json"] }
-thiserror = "1.0"
-clap = { version = "4.4", features = ["derive"] }
-clap_complete = "4.4"
+tokio = { version = "1.37.0", features = ["full"] }
+tracing = "0.1.40"
+tracing-subscriber = "0.3.18"
+reqwest = { version = "0.12.4", features = ["json"] }
+thiserror = "1.0.61"
+clap = { version = "4.5.4", features = ["derive", "env"] }
+clap_complete = "4.5.1"
 futures = "0.3"
-chrono = { version = "0.4", features = ["serde"] }
-rand = "0.9.1"
-lazy_static = "1.5.0"
+chrono = { version = "0.4.38", features = ["serde"] }
+rand = { version = "0.8.5", features = ["std_rng"] }
+lazy_static = "1.4.0"
 
 # For CLI output coloring
 colored = "2.1"
@@ -37,4 +37,7 @@ name = "scatterbrain"
 path = "src/bin/main.rs"
 
 [dev-dependencies]
-pretty_assertions = "1.4.1"
+pretty_assertions = "1.4.0"
+# Added for API tests
+tower = { version = "0.4", features = ["util"] }
+http-body-util = "0.1"
