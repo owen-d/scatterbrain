@@ -150,8 +150,8 @@ pub struct Plan {
     root: Task,
     levels: Vec<Level>,
     /// The original prompt or high-level goal for this plan.
-    goal: Option<String>,
-    notes: Option<String>,
+    pub goal: Option<String>,
+    pub notes: Option<String>,
 }
 
 impl Plan {
@@ -908,8 +908,9 @@ impl Context {
         // Get all levels from the plan
         let levels = self.plan.levels().to_vec();
 
-        // Get the plan's goal
+        // Get the plan's goal and notes
         let goal = self.plan.goal.clone();
+        let plan_notes = self.plan.notes.clone(); // Clone plan notes
 
         // Create the distilled context with all components using the new constructor
         let distilled = DistilledContext::new(
@@ -920,6 +921,7 @@ impl Context {
             levels,
             self.history.iter().cloned().collect(),
             goal,
+            plan_notes, // Pass plan notes
         );
 
         PlanResponse::new((), distilled)
@@ -1064,6 +1066,8 @@ pub struct DistilledContext {
     pub levels: Vec<Level>,
     /// Recent state transition history
     pub transition_history: Vec<TransitionLogEntry>,
+    /// Optional notes associated with the plan.
+    pub plan_notes: Option<String>,
 }
 
 impl DistilledContext {
@@ -1076,6 +1080,7 @@ impl DistilledContext {
         levels: Vec<Level>,
         transition_history: Vec<TransitionLogEntry>,
         goal: Option<String>,
+        plan_notes: Option<String>,
     ) -> Self {
         Self {
             usage_summary,
@@ -1085,6 +1090,7 @@ impl DistilledContext {
             levels,
             transition_history,
             goal,
+            plan_notes,
         }
     }
 }

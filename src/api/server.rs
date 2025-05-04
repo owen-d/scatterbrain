@@ -15,6 +15,7 @@ use axum::{
     Json, Router,
 };
 use futures::Stream;
+use html_escape;
 use serde::{Deserialize, Serialize};
 use tokio::net::TcpListener;
 use tower_http::cors::{Any, CorsLayer};
@@ -751,13 +752,23 @@ fn render_ui_template(
     // --- End Plan Tab Navigation ---
 
     // --- Display Plan Goal ---
-    if let Some(goal) = &distilled_context.goal {
+    if let Some(goal) = &plan.goal {
         html.push_str(&format!(
             "<div class='plan-goal'><h2>Goal: {}</h2></div>",
-            goal
+            html_escape::encode_text(goal)
         ));
     }
     // --- End Display Plan Goal ---
+
+    // --- Display Plan Notes ---
+    if let Some(notes) = &plan.notes {
+        html.push_str("<div class='plan-notes'>");
+        html.push_str("<h3>Notes:</h3>");
+        let formatted_notes = html_escape::encode_text(notes).replace("\n", "<br>");
+        html.push_str(&format!("<p>{}</p>", formatted_notes));
+        html.push_str("</div>");
+    }
+    // --- End Display Plan Notes ---
 
     // Add level legend
     html.push_str("<div class='level-legend'>");
@@ -960,7 +971,9 @@ fn render_tasks_html(
 
         // Render notes if they exist
         if let Some(notes) = task.notes() {
-            html.push_str(&format!("<div class='task-notes'>{}</div>", notes));
+            // Escape HTML entities in notes
+            let escaped_notes = html_escape::encode_text(notes);
+            html.push_str(&format!("<div class='task-notes'>{}</div>", escaped_notes));
         }
 
         // Render subtasks recursively
@@ -1210,6 +1223,22 @@ const HTML_TEMPLATE_HEADER: &str = r#"<!DOCTYPE html>
             border-left: 3px solid #ccc;
             white-space: pre-wrap; /* Preserve whitespace and wrap */
             word-break: break-word;
+        }
+        .plan-goal, .plan-notes { /* Add plan-notes styles */
+             background: #eaf2f8; /* Light blue background */
+             padding: 15px;
+             border-radius: 5px;
+             margin-bottom: 20px;
+             border-left: 4px solid #aed6f1; /* Lighter blue border */
+        }
+        .plan-notes h3 {
+             margin-top: 0;
+             color: #2980b9; /* Darker blue for notes title */
+        }
+        .plan-notes p {
+            white-space: pre-wrap; /* Preserve whitespace and wrap */
+            word-break: break-word;
+            color: #34495e; /* Dark grey text */
         }
     </style>
 </head>

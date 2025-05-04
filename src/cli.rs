@@ -625,6 +625,18 @@ where
 fn print_plan_response(response: &crate::models::PlanResponse<crate::models::Plan>) {
     let plan = response.inner();
     println!("Scatterbrain Plan:");
+    // Print Goal if it exists
+    if let Some(goal) = &plan.goal {
+        // Access goal directly
+        println!("Goal: {}", goal.bright_blue());
+    }
+    // Print Notes if they exist
+    if let Some(notes) = &plan.notes {
+        // Access notes directly
+        println!("Notes:\n{}", notes);
+        println!("---"); // Add a separator
+    }
+
     println!("Levels: {}", plan.levels().len());
     println!("\nRoot Tasks:");
     if plan.root().subtasks().is_empty() {
@@ -844,7 +856,7 @@ GLOBAL FLAGS:
   --server=<url>                                         Specify the server URL (default: http://localhost:3000)
 
 PLAN MANAGEMENT (scatterbrain plan ...):
-  $ scatterbrain plan create "<prompt>"                  Create a new plan from a prompt, print its ID and the guide
+  $ scatterbrain plan create "<prompt>" [--notes <TEXT>] Create a new plan from a prompt (and optional notes), print its ID and the guide
   $ scatterbrain plan delete <id>                        Delete a plan by its ID
   $ scatterbrain plan list                               List available plan IDs
   $ scatterbrain plan set <id>                           (Info only) Shows how to set the environment variable
@@ -923,6 +935,7 @@ fn print_guide() {
 /// Print a distilled context from any PlanResponse
 fn print_distilled_context_response<T>(response: &crate::models::PlanResponse<T>) {
     let context = &response.distilled_context;
+    let truncation_limit = 400;
 
     println!("\n--- Current Context ---");
 
@@ -932,6 +945,22 @@ fn print_distilled_context_response<T>(response: &crate::models::PlanResponse<T>
     // Print the overall plan goal if it exists
     if let Some(goal) = &context.goal {
         println!("Goal: {}", goal.bright_blue());
+    }
+
+    // Print Plan Notes (truncated)
+    if let Some(notes) = &context.plan_notes {
+        print!("Plan Notes: ");
+        if notes.len() > truncation_limit {
+            // Truncate and add indicator
+            let truncated_notes: String = notes.chars().take(truncation_limit).collect();
+            println!(
+                "{}... (use 'plan show' for full notes)",
+                truncated_notes.trim()
+            );
+        } else {
+            // Print full notes if short enough
+            println!("{}", notes);
+        }
     }
 
     // Current Task/Level Info
