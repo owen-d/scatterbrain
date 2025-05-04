@@ -717,13 +717,16 @@ Scatterbrain helps you:
 Scatterbrain organizes work into separate "plans". Each command needs to know which plan you're working on.
 
 1. CREATE A PLAN FROM A PROMPT:
-   $ scatterbrain plan create "My new project goal"
+   $ scatterbrain plan create "My new project goal" [--notes <TEXT>]
    > Created new plan with ID: 42
    > Plan 42 created with goal: "My new project goal"
    > Use 'export {}=42' to set this plan as default for your session.
    > --- Scatterbrain Guide ---
    > (The rest of this guide will be printed here)
    > --------------------------
+   Tip: Keep the <prompt> concise (like a title). Use the optional --notes flag
+   to add more detailed descriptions, context, or acceptance criteria, especially
+   for non-trivial plans.
 
 2. SPECIFY THE ACTIVE PLAN:
    You MUST tell scatterbrain which plan to use in one of two ways:
@@ -856,7 +859,7 @@ GLOBAL FLAGS:
   --server=<url>                                         Specify the server URL (default: http://localhost:3000)
 
 PLAN MANAGEMENT (scatterbrain plan ...):
-  $ scatterbrain plan create "<prompt>" [--notes <TEXT>] Create a new plan from a prompt (and optional notes), print its ID and the guide
+  $ scatterbrain plan create "<prompt>" [--notes <TEXT>] Create a new plan. Use a short prompt/title and add details via --notes. Prints ID and guide.
   $ scatterbrain plan delete <id>                        Delete a plan by its ID
   $ scatterbrain plan list                               List available plan IDs
   $ scatterbrain plan set <id>                           (Info only) Shows how to set the environment variable
