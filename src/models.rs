@@ -151,15 +151,17 @@ pub struct Plan {
     levels: Vec<Level>,
     /// The original prompt or high-level goal for this plan.
     goal: Option<String>,
+    notes: Option<String>,
 }
 
 impl Plan {
     /// Creates a new plan with the given levels and an optional goal
-    pub fn new(levels: Vec<Level>, goal: Option<String>) -> Self {
+    pub fn new(levels: Vec<Level>, goal: Option<String>, notes: Option<String>) -> Self {
         Self {
             root: Task::new("root".to_string()),
             levels,
             goal,
+            notes,
         }
     }
 
@@ -291,7 +293,7 @@ impl Context {
 
     /// Creates a default context with default levels and a seed RNG
     pub fn default_with_seed(seed: u64) -> Self {
-        let plan = Plan::new(default_levels(), None); // Pass None for goal here
+        let plan = Plan::new(default_levels(), None, None); // Pass None for goal here
         Self::new_with_seed(plan, seed)
     }
 
@@ -1168,7 +1170,11 @@ impl Core {
 
     /// Creates a new plan with the given goal and returns its unique ID (Lease).
     /// Handles potential collisions if a randomly generated u8 ID already exists.
-    pub fn create_plan(&self, goal: Option<String>) -> Result<PlanId, PlanError> {
+    pub fn create_plan(
+        &self,
+        goal: Option<String>,
+        notes: Option<String>,
+    ) -> Result<PlanId, PlanError> {
         let mut plans = self.inner.write().map_err(|_| PlanError::LockError)?;
 
         let mut new_id_val;
@@ -1183,8 +1189,8 @@ impl Core {
         }
 
         let new_id = Lease(new_id_val);
-        // Create a new plan with the provided goal
-        let plan = Plan::new(default_levels(), goal);
+        // Create a new plan with the provided goal and notes
+        let plan = Plan::new(default_levels(), goal, notes);
         // Use a random seed for new plans, creating context directly with seed
         let new_context = Context::new_with_seed(plan, rand::random());
         plans.insert(new_id, new_context);
@@ -1392,7 +1398,7 @@ mod tests {
                 "Guidance 2".to_string(),
             ),
         ];
-        let plan = Plan::new(levels, Some("Test Goal".to_string()));
+        let plan = Plan::new(levels, Some("Test Goal".to_string()), None);
         Context::new_with_seed(plan, 0) // Use a fixed seed for reproducibility if needed
     }
 
@@ -1743,7 +1749,9 @@ mod tests {
     #[test]
     fn test_core_notes_crud() {
         let core = Core::new();
-        let plan_id = core.create_plan(Some("Test Plan".to_string())).unwrap();
+        let plan_id = core
+            .create_plan(Some("Test Plan".to_string()), None)
+            .unwrap();
 
         // 1. Add a task (initially no notes)
         let (_, task_index) = core

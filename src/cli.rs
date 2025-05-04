@@ -175,6 +175,9 @@ enum PlanCommands {
         /// The initial high-level goal or prompt for the plan
         #[arg(index = 1)]
         prompt: String,
+        /// Optional longer-form notes or description for the plan
+        #[arg(long)] // Add the optional notes argument
+        notes: Option<String>,
     },
     /// Delete a plan by its ID
     Delete {
@@ -521,9 +524,12 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
         Commands::PlanCmd(plan_command) => {
             let client = create_client(&cli.server);
             match plan_command {
-                PlanCommands::Create { prompt } => {
-                    // Pass the prompt to the updated client method
-                    match client.create_plan(Some(prompt.clone())).await {
+                PlanCommands::Create { prompt, notes } => {
+                    // Pass the prompt and notes to the updated client method
+                    match client
+                        .create_plan(Some(prompt.clone()), notes.clone())
+                        .await
+                    {
                         Ok(lease) => {
                             let new_id = lease.value(); // lease is PlanId
                             println!("Created new plan with ID: {}", new_id);

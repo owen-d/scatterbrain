@@ -68,6 +68,7 @@ pub struct UncompleteTaskRequest {
 #[derive(Serialize, Deserialize, Default)] // Add Default for optional body
 pub struct CreatePlanRequest {
     pub prompt: Option<String>,
+    pub notes: Option<String>, // Add optional notes field
 }
 
 /// Request to set notes for a task
@@ -276,11 +277,13 @@ async fn create_plan_handler(
     // Use optional Json extractor for the request body
     payload: Option<Json<CreatePlanRequest>>,
 ) -> impl IntoResponse {
-    // Extract the prompt, defaulting to None if payload is missing or malformed
-    let prompt = payload.and_then(|json_payload| json_payload.0.prompt);
+    // Extract the prompt and notes, defaulting to None if payload is missing or malformed
+    let (prompt, notes) = payload
+        .map(|json_payload| (json_payload.0.prompt, json_payload.0.notes))
+        .unwrap_or((None, None));
 
-    // Call core.create_plan with the prompt
-    let result = core.create_plan(prompt);
+    // Call core.create_plan with the prompt and notes
+    let result = core.create_plan(prompt, notes); // Pass notes here
     map_core_result_simple(result) // Returns Lease (PlanId)
 }
 

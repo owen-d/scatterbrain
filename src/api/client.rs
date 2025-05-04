@@ -304,9 +304,15 @@ impl Client {
         self.request(Method::POST, &path, Some(&body)).await
     }
 
-    /// Plan Management Methods
-    pub async fn create_plan(&self, prompt: Option<String>) -> Result<models::Lease, ClientError> {
-        let body = CreatePlanRequest { prompt };
+    /// Create a new plan with an optional prompt and notes.
+    pub async fn create_plan(
+        &self,
+        prompt: Option<String>,
+        notes: Option<String>,
+    ) -> Result<models::PlanId, ClientError> {
+        // Use CreatePlanRequest struct, now assuming it has prompt and notes
+        let body = CreatePlanRequest { prompt, notes };
+        // Use the existing helper method
         self.request(Method::POST, "/api/plans", Some(&body)).await
     }
 
