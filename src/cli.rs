@@ -89,7 +89,7 @@ enum TaskCommands {
 
         /// Optional notes for the task
         #[arg(long)]
-        notes: Option<String>,
+        notes: String,
     },
 
     /// Complete the current task or the task at the specified index
@@ -230,7 +230,7 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
                 } => {
                     // Pass id.value() and notes.clone() to client method
                     let response = client
-                        .add_task(id.value(), description.clone(), *level, notes.clone())
+                        .add_task(id.value(), description.clone(), *level, Some(notes.clone()))
                         .await?;
                     let (_task, index) = response.inner();
                     println!(
@@ -845,7 +845,7 @@ PLAN MANAGEMENT (scatterbrain plan ...):
   $ scatterbrain plan show                               View the full plan with all tasks
 
 TASK MANAGEMENT (scatterbrain task ...):
-  $ scatterbrain task add --level <LEVEL> [--notes <TEXT>] "Description" Create new task (level required, notes optional)
+  $ scatterbrain task add --level <LEVEL> --notes <TEXT> "Description" Create new task (level required, notes required)
                                                          Note: Adding a subtask marks parents incomplete.
   $ scatterbrain task complete --index <INDEX> [--lease <ID>] [--force] [--summary <TEXT>] Complete task at specified index (summary required unless --force)
   $ scatterbrain task change-level <LEVEL_INDEX>         Change current task's abstraction level
@@ -1274,7 +1274,7 @@ mod tests {
                 } => {
                     assert_eq!(description, "New task desc");
                     assert_eq!(level, 0);
-                    assert_eq!(notes, Some("Some notes here".to_string()));
+                    assert_eq!(notes, "Some notes here");
                 }
                 _ => panic!("Expected TaskCommands::Add"),
             },
