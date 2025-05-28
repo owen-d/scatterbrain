@@ -201,7 +201,7 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
 
     match &cli.command {
         Commands::Serve { port, example } => {
-            println!("Starting scatterbrain API server on port {}...", port);
+            println!("Starting scatterbrain API server on port {port}...");
 
             // Core::new() now initializes the default plan
             let core = Core::new();
@@ -237,8 +237,7 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
                         .await?;
                     let (_task, index) = response.inner();
                     println!(
-                        "Added task: \"{}\" with level {} at index: {:?}",
-                        description, level, index
+                        "Added task: \"{description}\" with level {level} at index: {index:?}"
                     );
                     Ok(())
                 }
@@ -253,8 +252,8 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
                     let target_index = match parse_index(index) {
                         Ok(idx) => idx,
                         Err(e) => {
-                            eprintln!("Error parsing index: {}", e);
-                            return Err(e.into());
+                            eprintln!("Error parsing index: {e}");
+                            return Err(e);
                         }
                     };
 
@@ -276,7 +275,7 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
                                 .map(|i| i.to_string())
                                 .collect::<Vec<_>>()
                                 .join(",");
-                            println!("Completed task at index: [{}]", index_display);
+                            println!("Completed task at index: [{index_display}]");
                         } else {
                             println!("Failed to complete task (lease mismatch? already complete? check server logs)");
                         }
@@ -295,7 +294,7 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
                     // Pass id.value() to client method
                     let response = client.change_level(id.value(), index, *level_index).await?;
                     print_response(&response, |_| {
-                        println!("Changed level of current task to {}", level_index);
+                        println!("Changed level of current task to {level_index}");
                     });
                     Ok(())
                 }
@@ -314,7 +313,7 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
                     if !suggestions.is_empty() {
                         println!("\nVerification Suggestions:");
                         for suggestion in suggestions {
-                            println!("- {}", suggestion);
+                            println!("- {suggestion}");
                         }
                     }
                     Ok(())
@@ -332,14 +331,13 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
                                     removed_task.description(),
                                     index // Use original string for display
                                 ),
-                                Err(e) => eprintln!(
-                                    "Server error removing task at index {}: {}",
-                                    index, e
-                                ),
+                                Err(e) => {
+                                    eprintln!("Server error removing task at index {index}: {e}")
+                                }
                             });
                         }
                         Err(e) => {
-                            eprintln!("Client error removing task: {}", e);
+                            eprintln!("Client error removing task: {e}");
                         }
                     };
                     Ok(())
@@ -351,18 +349,17 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
                     match client.uncomplete_task(id.value(), parsed_index).await {
                         Ok(response) => {
                             print_response(&response, |result| match result {
-                                Ok(true) => println!("Uncompleted task at index: {}", index),
+                                Ok(true) => println!("Uncompleted task at index: {index}"),
                                 Ok(false) => {
-                                    println!("Task at index {} was already incomplete.", index)
+                                    println!("Task at index {index} was already incomplete.")
                                 }
                                 Err(e) => eprintln!(
-                                    "Server error uncompleting task at index {}: {}",
-                                    index, e
+                                    "Server error uncompleting task at index {index}: {e}"
                                 ),
                             });
                         }
                         Err(e) => {
-                            eprintln!("Client error uncompleting task: {}", e);
+                            eprintln!("Client error uncompleting task: {e}");
                         }
                     };
                     Ok(())
@@ -376,13 +373,13 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
                             match client.get_task_notes(id.value(), parsed_index).await {
                                 Ok(notes_opt) => {
                                     if let Some(notes) = notes_opt {
-                                        println!("Notes for task at index {}:\n{}", index, notes);
+                                        println!("Notes for task at index {index}:\n{notes}");
                                     } else {
-                                        println!("No notes found for task at index {}.", index);
+                                        println!("No notes found for task at index {index}.");
                                     }
                                 }
                                 Err(e) => {
-                                    eprintln!("Error getting notes: {}", e);
+                                    eprintln!("Error getting notes: {e}");
                                 }
                             }
                             Ok(())
@@ -395,10 +392,10 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
                             // Handle the Result<(), String> within PlanResponse
                             print_response(&response, |res| match res {
                                 Ok(_) => {
-                                    println!("Notes for task at index {} set successfully.", index)
+                                    println!("Notes for task at index {index} set successfully.")
                                 }
                                 Err(e) => {
-                                    eprintln!("Error setting notes for task {}: {}", index, e)
+                                    eprintln!("Error setting notes for task {index}: {e}")
                                 }
                             });
                             Ok(())
@@ -410,11 +407,10 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
                             // Handle the Result<(), String> within PlanResponse
                             print_response(&response, |res| match res {
                                 Ok(_) => println!(
-                                    "Notes for task at index {} deleted successfully.",
-                                    index
+                                    "Notes for task at index {index} deleted successfully."
                                 ),
                                 Err(e) => {
-                                    eprintln!("Error deleting notes for task {}: {}", index, e)
+                                    eprintln!("Error deleting notes for task {index}: {e}")
                                 }
                             });
                             Ok(())
@@ -532,18 +528,18 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
                     {
                         Ok(lease) => {
                             let new_id = lease.value(); // lease is PlanId
-                            println!("Created new plan with ID: {}", new_id);
+                            println!("Created new plan with ID: {new_id}");
                             println!(
                                 "\nIMPORTANT: Set the environment variable to work with this plan:"
                             );
-                            println!("  export {}={}", PLAN_ID_ENV_VAR, new_id);
+                            println!("  export {PLAN_ID_ENV_VAR}={new_id}");
                             println!("\n---");
                             println!("You will update scatterbrain after each point of progress or new discovery. This includes initial surveying of relevant code, formulating a plan of attack, successful additions, realizations that you've hit a dead end, etc. Do not stray from this path; it is important to use the plan to drive your efforts and keep it as an auditable record. This will also help you discover patterns in your approach and improve your ability to reason about the problem space.");
                             println!("Do not stop unless you have questions you can't reasonably answer yourself. Use your best judgment, do not ask for my approval. Continue using scatterbrain to refine and adjust your approach and move forward with solving our goal.");
                             println!("---\n");
                             print_guide(); // Print the full guide
                         }
-                        Err(e) => eprintln!("Error creating plan: {}", e),
+                        Err(e) => eprintln!("Error creating plan: {e}"),
                     }
                     Ok(())
                 }
@@ -552,11 +548,11 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
                     let _plan_id_to_delete = PlanId::new(*id);
                     // Pass the u8 value *id* to client.delete_plan
                     match client.delete_plan(*id).await {
-                        Ok(_) => println!("Deleted plan with ID: {}", id),
+                        Ok(_) => println!("Deleted plan with ID: {id}"),
                         Err(ClientError::PlanNotFound(_)) => {
-                            eprintln!("Error: Plan with ID '{}' not found.", id)
+                            eprintln!("Error: Plan with ID '{id}' not found.")
                         }
-                        Err(e) => eprintln!("Error deleting plan '{}': {}", id, e),
+                        Err(e) => eprintln!("Error deleting plan '{id}': {e}"),
                     }
                     Ok(())
                 }
@@ -573,13 +569,13 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
                                 }
                             }
                         }
-                        Err(e) => eprintln!("Error listing plans: {}", e),
+                        Err(e) => eprintln!("Error listing plans: {e}"),
                     }
                     Ok(())
                 }
                 PlanCommands::Set { id } => {
                     println!("To set the active plan, use your shell's command:");
-                    println!("  export {}={}", PLAN_ID_ENV_VAR, id);
+                    println!("  export {PLAN_ID_ENV_VAR}={id}");
                     println!("Note: This only affects the current shell session.");
                     Ok(())
                 }
@@ -613,11 +609,11 @@ where
     if !response.suggested_followups.is_empty() {
         println!("\nSuggested next steps:");
         for suggestion in &response.suggested_followups {
-            println!("  • {}", suggestion);
+            println!("  • {suggestion}");
         }
     }
     if let Some(reminder) = &response.reminder {
-        println!("\nReminder: {}", reminder);
+        println!("\nReminder: {reminder}");
     }
     print_distilled_context_response(response);
 }
@@ -633,7 +629,7 @@ fn print_plan_response(response: &crate::models::PlanResponse<crate::models::Pla
     // Print Notes if they exist
     if let Some(notes) = &plan.notes {
         // Access notes directly
-        println!("Notes:\n{}", notes);
+        println!("Notes:\n{notes}");
         println!("---"); // Add a separator
     }
 
@@ -663,7 +659,7 @@ fn print_task(task: &crate::models::Task, index: Vec<usize>) {
         .join(".");
 
     let level_str = if let Some(level_index) = task.level_index() {
-        format!("level: {}", level_index)
+        format!("level: {level_index}")
     } else {
         "level: unknown".to_string()
     };
@@ -683,7 +679,7 @@ fn print_task(task: &crate::models::Task, index: Vec<usize>) {
         println!(
             "{}{}",
             notes_indent,
-            notes.replace('\n', &format!("\n{}", notes_indent))
+            notes.replace('\n', &format!("\n{notes_indent}"))
         ); // Indent multi-line notes
     }
 
@@ -932,7 +928,7 @@ COMMON MISTAKES TO AVOID:
 
 fn print_guide() {
     let guide_text = get_guide_string();
-    println!("{}", guide_text);
+    println!("{guide_text}");
 }
 
 /// Print a distilled context from any PlanResponse
@@ -962,7 +958,7 @@ fn print_distilled_context_response<T>(response: &crate::models::PlanResponse<T>
             );
         } else {
             // Print full notes if short enough
-            println!("{}", notes);
+            println!("{notes}");
         }
     }
 
@@ -974,7 +970,7 @@ fn print_distilled_context_response<T>(response: &crate::models::PlanResponse<T>
             task.description()
         );
         if let Some(level) = task.level_index() {
-            print!(" (level: {})", level);
+            print!(" (level: {level})");
         }
         println!();
     } else {
@@ -999,7 +995,7 @@ fn print_distilled_context_response<T>(response: &crate::models::PlanResponse<T>
             if !questions.is_empty() {
                 println!("  Sample Questions:");
                 for q in questions {
-                    println!("    - {}", q);
+                    println!("    - {q}");
                 }
             }
 
@@ -1049,19 +1045,19 @@ fn print_distilled_context_response<T>(response: &crate::models::PlanResponse<T>
         .map(|(idx, level)| format!("{}:{}", idx, level.name()))
         .collect::<Vec<_>>()
         .join(" | ");
-    println!("  {}", level_summary);
+    println!("  {level_summary}");
     println!("\n");
 
     if !response.suggested_followups.is_empty() {
         println!("Suggested next steps:");
         for followup in &response.suggested_followups {
-            println!("  • {}", followup);
+            println!("  • {followup}");
         }
         println!("\n");
     }
 
     if let Some(reminder) = &response.reminder {
-        println!("Reminder: {}", reminder);
+        println!("Reminder: {reminder}");
         println!("\n");
     }
 }
@@ -1090,7 +1086,7 @@ fn print_task_tree(_nodes: &[crate::models::TaskTreeNode], indent: usize) {
             println!(
                 "{}> {}",
                 notes_indent,
-                notes.replace('\n', &format!("\n{}> ", notes_indent))
+                notes.replace('\n', &format!("\n{notes_indent}> "))
             ); // Indent multi-line notes
         }
 
@@ -1104,7 +1100,7 @@ fn print_task_tree(_nodes: &[crate::models::TaskTreeNode], indent: usize) {
 fn create_example_tasks(core: &Core) {
     // Access the context for the default plan ID
     let result: Result<Result<(), PlanError>, PlanError> =
-        core.with_plan_context(&*DEFAULT_PLAN_ID, |context| {
+        core.with_plan_context(&DEFAULT_PLAN_ID, |context| {
             // Create top-level tasks (level 0 - Business Strategy)
             let result = context.add_task("Build Web Application".to_string(), 0, None);
             let (_, idx_root) = result.into_inner(); // Keep root index
@@ -1203,7 +1199,7 @@ fn create_example_tasks(core: &Core) {
 
     // Handle potential error from with_plan_context (e.g., PlanNotFound)
     if let Err(e) = result {
-        eprintln!("Error creating example tasks: {}", e);
+        eprintln!("Error creating example tasks: {e}");
     }
 }
 
@@ -1217,16 +1213,14 @@ fn get_plan_id(cli: &Cli) -> Result<PlanId, Box<dyn std::error::Error>> {
     // Otherwise, check the environment variable
     let id_str = std::env::var(PLAN_ID_ENV_VAR).map_err(|_| {
         format!(
-            "Error: Plan ID not specified. Use the --plan=<id> flag or set the {} environment variable (e.g., export {}=<id>). Use 'scatterbrain plan list' to see available IDs.",
-            PLAN_ID_ENV_VAR, PLAN_ID_ENV_VAR
+            "Error: Plan ID not specified. Use the --plan=<id> flag or set the {PLAN_ID_ENV_VAR} environment variable (e.g., export {PLAN_ID_ENV_VAR}=<id>). Use 'scatterbrain plan list' to see available IDs."
         )
     })?;
 
     // Parse the env var string to u8
     let id_val = id_str.parse::<u8>().map_err(|e| {
         format!(
-            "Invalid value in {}: '{}'. Must be a number between 0 and 255. Error: {}",
-            PLAN_ID_ENV_VAR, id_str, e
+            "Invalid value in {PLAN_ID_ENV_VAR}: '{id_str}'. Must be a number between 0 and 255. Error: {e}"
         )
     })?;
 
@@ -1256,7 +1250,7 @@ mod tests {
 
         // Check specific formatted parts by searching for the final expected string
         assert!(
-            guide.contains(&format!("Use 'export {}=42'", env_var)),
+            guide.contains(&format!("Use 'export {env_var}=42'")),
             "Check export example format"
         );
         assert!(
@@ -1272,7 +1266,7 @@ mod tests {
             "Check workflow guide format"
         );
         assert!(
-            guide.contains(&format!("Use `export {}=<id>`", env_var)),
+            guide.contains(&format!("Use `export {env_var}=<id>`")),
             "Check best practices format"
         );
         assert!(

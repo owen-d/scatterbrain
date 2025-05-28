@@ -120,7 +120,7 @@ impl Client {
             let error_message = error_response
                 .ok()
                 .and_then(|resp| resp.error)
-                .unwrap_or_else(|| format!("HTTP error: {}", status));
+                .unwrap_or_else(|| format!("HTTP error: {status}"));
 
             // Check for specific PlanNotFound error pattern if possible
             if error_message.contains("Plan ID '") && error_message.contains("' not found") {
@@ -139,7 +139,7 @@ impl Client {
         &self,
         id: u8,
     ) -> Result<models::PlanResponse<models::Plan>, ClientError> {
-        let path = format!("/api/plans/{}/plan", id);
+        let path = format!("/api/plans/{id}/plan");
         self.request(Method::GET, &path, None::<&()>).await
     }
 
@@ -148,7 +148,7 @@ impl Client {
         &self,
         id: u8,
     ) -> Result<models::PlanResponse<Option<models::Current>>, ClientError> {
-        let path = format!("/api/plans/{}/current", id);
+        let path = format!("/api/plans/{id}/current");
         self.request(Method::GET, &path, None::<&()>).await
     }
 
@@ -157,7 +157,7 @@ impl Client {
         &self,
         id: u8,
     ) -> Result<models::PlanResponse<()>, ClientError> {
-        let path = format!("/api/plans/{}/distilled", id);
+        let path = format!("/api/plans/{id}/distilled");
         self.request(Method::GET, &path, None::<&()>).await
     }
 
@@ -169,7 +169,7 @@ impl Client {
         level_index: usize,
         notes: Option<String>,
     ) -> Result<models::PlanResponse<(models::Task, Index)>, ClientError> {
-        let path = format!("/api/plans/{}/task", id);
+        let path = format!("/api/plans/{id}/task");
         let body = AddTaskRequest {
             description,
             level_index,
@@ -187,7 +187,7 @@ impl Client {
         force: bool,
         summary: Option<String>,
     ) -> Result<models::PlanResponse<bool>, ClientError> {
-        let path = format!("/api/plans/{}/task/complete", id);
+        let path = format!("/api/plans/{id}/task/complete");
         let body = CompleteTaskRequest {
             index,
             lease,
@@ -203,7 +203,7 @@ impl Client {
         id: u8,
         index: Index,
     ) -> Result<models::PlanResponse<Option<String>>, ClientError> {
-        let path = format!("/api/plans/{}/move", id);
+        let path = format!("/api/plans/{id}/move");
         let body = MoveToRequest { index };
         self.request(Method::POST, &path, Some(&body)).await
     }
@@ -215,7 +215,7 @@ impl Client {
         index: Index,
         level_index: usize,
     ) -> Result<models::PlanResponse<Result<(), String>>, ClientError> {
-        let path = format!("/api/plans/{}/task/level", id);
+        let path = format!("/api/plans/{id}/task/level");
         let body = ChangeLevelRequest { index, level_index };
         self.request(Method::POST, &path, Some(&body)).await
     }
@@ -226,7 +226,7 @@ impl Client {
         id: u8,
         index: Index,
     ) -> Result<models::PlanResponse<(models::Lease, Vec<String>)>, ClientError> {
-        let path = format!("/api/plans/{}/task/lease", id);
+        let path = format!("/api/plans/{id}/task/lease");
         let body = LeaseRequest { index };
         self.request(Method::POST, &path, Some(&body)).await
     }
@@ -242,7 +242,7 @@ impl Client {
             .map(|i| i.to_string())
             .collect::<Vec<_>>()
             .join(",");
-        let path = format!("/api/plans/{}/tasks/{}", id, index_str);
+        let path = format!("/api/plans/{id}/tasks/{index_str}");
         self.request(Method::DELETE, &path, None::<&()>).await
     }
 
@@ -257,7 +257,7 @@ impl Client {
             .map(|i| i.to_string())
             .collect::<Vec<_>>()
             .join(",");
-        let path = format!("/api/plans/{}/notes/{}", id, index_str);
+        let path = format!("/api/plans/{id}/notes/{index_str}");
         self.request(Method::GET, &path, None::<&()>).await
     }
 
@@ -273,7 +273,7 @@ impl Client {
             .map(|i| i.to_string())
             .collect::<Vec<_>>()
             .join(",");
-        let path = format!("/api/plans/{}/notes/{}", id, index_str);
+        let path = format!("/api/plans/{id}/notes/{index_str}");
         let body = SetTaskNotesRequest { notes };
         self.request(Method::POST, &path, Some(&body)).await
     }
@@ -289,7 +289,7 @@ impl Client {
             .map(|i| i.to_string())
             .collect::<Vec<_>>()
             .join(",");
-        let path = format!("/api/plans/{}/notes/{}", id, index_str);
+        let path = format!("/api/plans/{id}/notes/{index_str}");
         self.request(Method::DELETE, &path, None::<&()>).await
     }
 
@@ -299,7 +299,7 @@ impl Client {
         id: u8,
         index: Index,
     ) -> Result<models::PlanResponse<Result<bool, String>>, ClientError> {
-        let path = format!("/api/plans/{}/task/uncomplete", id);
+        let path = format!("/api/plans/{id}/task/uncomplete");
         let body = UncompleteTaskRequest { index };
         self.request(Method::POST, &path, Some(&body)).await
     }
@@ -317,7 +317,7 @@ impl Client {
     }
 
     pub async fn delete_plan(&self, id: u8) -> Result<(), ClientError> {
-        let path = format!("/api/plans/{}", id);
+        let path = format!("/api/plans/{id}");
         self.request(Method::DELETE, &path, None::<&()>).await
     }
 

@@ -391,8 +391,7 @@ impl Context {
                     self.log_transition(
                         "uncomplete_parent".to_string(),
                         Some(format!(
-                            "Uncompleted parent task at index: {:?}",
-                            ancestor_index
+                            "Uncompleted parent task at index: {ancestor_index:?}"
                         )),
                     );
                 } else {
@@ -400,8 +399,7 @@ impl Context {
                     self.log_transition(
                         "uncomplete_parent_failed".to_string(),
                         Some(format!(
-                            "Failed to find ancestor task at index: {:?}",
-                            ancestor_index
+                            "Failed to find ancestor task at index: {ancestor_index:?}"
                         )),
                     );
                     break; // Stop if an ancestor is missing
@@ -419,7 +417,7 @@ impl Context {
     pub fn remove_task(&mut self, index: Index) -> PlanResponse<Result<Task, String>> {
         self.log_transition(
             "remove_task".to_string(),
-            Some(format!("Attempting to remove task at index: {:?}", index)),
+            Some(format!("Attempting to remove task at index: {index:?}")),
         );
 
         // Basic validation: Cannot remove root (empty index)
@@ -437,7 +435,7 @@ impl Context {
         let parent_task = match self.get_task_mut(parent_index.clone()) {
             Some(task) => task,
             None => {
-                let err_msg = format!("Parent task at index {:?} not found.", parent_index);
+                let err_msg = format!("Parent task at index {parent_index:?} not found.");
                 self.log_transition("remove_task_failed".to_string(), Some(err_msg.clone()));
                 return PlanResponse::new(Err(err_msg), self.distilled_context().context());
             }
@@ -445,10 +443,8 @@ impl Context {
 
         // Validate the child index and remove the task
         if *child_idx >= parent_task.subtasks.len() {
-            let err_msg = format!(
-                "Child index {} out of bounds for parent {:?}",
-                child_idx, parent_index
-            );
+            let err_msg =
+                format!("Child index {child_idx} out of bounds for parent {parent_index:?}");
             self.log_transition("remove_task_failed".to_string(), Some(err_msg.clone()));
             return PlanResponse::new(Err(err_msg), self.distilled_context().context());
         }
@@ -482,7 +478,7 @@ impl Context {
     pub fn move_to(&mut self, index: Index) -> PlanResponse<Option<String>> {
         self.log_transition(
             "move_to".to_string(),
-            Some(format!("Moving cursor to index: {:?}", index)),
+            Some(format!("Moving cursor to index: {index:?}")),
         );
 
         // Validate the index
@@ -518,10 +514,7 @@ impl Context {
         if !force {
             if let Some(required_lease) = self.leases.get(&index) {
                 if lease_attempt.is_none() {
-                    let msg = format!(
-                        "Task at index {:?} requires a lease to be completed.",
-                        index
-                    );
+                    let msg = format!("Task at index {index:?} requires a lease to be completed.");
                     self.log_transition("complete_task_failed".to_string(), Some(msg.clone()));
                     return PlanResponse::new(Err(msg), self.distilled_context().context());
                 }
@@ -542,10 +535,8 @@ impl Context {
 
         // Check for summary if force is false
         if !force && summary.is_none() {
-            let msg = format!(
-                "Task at index {:?} requires a summary for non-forced completion.",
-                index
-            );
+            let msg =
+                format!("Task at index {index:?} requires a summary for non-forced completion.");
             self.log_transition("complete_task_failed".to_string(), Some(msg.clone()));
             return PlanResponse::new(Err(msg), self.distilled_context().context());
         }
@@ -553,13 +544,12 @@ impl Context {
         self.log_transition(
             "complete_task".to_string(),
             Some(format!(
-                "Completing task at index: {:?} (force: {})",
-                index, force
+                "Completing task at index: {index:?} (force: {force})"
             )),
         );
 
         // First, get a clone of the task for generating suggestions
-        let task_clone_opt = self.get_task(index.clone()).map(|t| t.clone());
+        let task_clone_opt = self.get_task(index.clone()).cloned();
 
         // Complete the task
         let success = if let Some(task) = self.get_task_mut(index.clone()) {
@@ -604,15 +594,14 @@ impl Context {
         self.log_transition(
             "change_level".to_string(),
             Some(format!(
-                "Changing level for task {:?} to {}",
-                index, level_index
+                "Changing level for task {index:?} to {level_index}"
             )),
         );
 
         // Validate: the level must exist
         if level_index >= self.plan.level_count() {
             return PlanResponse::new(
-                Err(format!("Level index {} is out of bounds", level_index)),
+                Err(format!("Level index {level_index} is out of bounds")),
                 self.distilled_context().context(),
             );
         }
@@ -626,8 +615,7 @@ impl Context {
                 if level_index > parent_level {
                     return PlanResponse::new(
                         Err(format!(
-                            "Child task cannot have a higher abstraction level ({}) than its parent ({})",
-                            level_index, parent_level
+                            "Child task cannot have a higher abstraction level ({level_index}) than its parent ({parent_level})"
                         )),
                         self.distilled_context().context(),
                     );
@@ -641,15 +629,12 @@ impl Context {
                 let subtask_level = subtask.level_index().unwrap_or(depth + 1);
                 if subtask_level > max_level {
                     return Err(format!(
-                        "Cannot set level to {} because a child task has a higher level ({})",
-                        max_level, subtask_level
+                        "Cannot set level to {max_level} because a child task has a higher level ({subtask_level})"
                     ));
                 }
 
                 // Recursively check this subtask's children
-                if let Err(e) = check_children(subtask, depth + 1, max_level) {
-                    return Err(e);
-                }
+                check_children(subtask, depth + 1, max_level)?
             }
             Ok(())
         }
@@ -702,8 +687,7 @@ impl Context {
                     self.log_transition(
                         "Uncomplete Task".to_string(),
                         Some(format!(
-                            "Uncompleted task \"{}\" at index {}",
-                            task_description, index_str
+                            "Uncompleted task \"{task_description}\" at index {index_str}"
                         )),
                     );
                     Ok(true)
@@ -792,7 +776,7 @@ impl Context {
     pub fn set_current_level(&mut self, level: usize) {
         self.log_transition(
             "set_current_level".to_string(),
-            Some(format!("Setting current level to: {}", level)),
+            Some(format!("Setting current level to: {level}")),
         );
 
         while self.cursor.len() > level {
@@ -935,7 +919,7 @@ impl Context {
     ) -> PlanResponse<Result<(), String>> {
         self.log_transition(
             "set_task_notes".to_string(),
-            Some(format!("Setting notes for task at index: {:?}", index)),
+            Some(format!("Setting notes for task at index: {index:?}")),
         );
 
         let result = match self.get_task_mut(index.clone()) {
@@ -943,7 +927,7 @@ impl Context {
                 task.set_notes(Some(notes));
                 Ok(())
             }
-            None => Err(format!("Task not found at index: {:?}", index)),
+            None => Err(format!("Task not found at index: {index:?}")),
         };
 
         PlanResponse::new(result, self.distilled_context().context())
@@ -955,7 +939,7 @@ impl Context {
         // but here we need the result first to log accurately.
         let result = match self.get_task(index.clone()) {
             Some(task) => Ok(task.notes().map(|s| s.to_string())),
-            None => Err(format!("Task not found at index: {:?}", index)),
+            None => Err(format!("Task not found at index: {index:?}")),
         };
 
         // Log transition after getting the result -- REMOVED because get_task_notes is &self
@@ -971,7 +955,7 @@ impl Context {
     pub fn delete_task_notes(&mut self, index: Index) -> PlanResponse<Result<(), String>> {
         self.log_transition(
             "delete_task_notes".to_string(),
-            Some(format!("Deleting notes for task at index: {:?}", index)),
+            Some(format!("Deleting notes for task at index: {index:?}")),
         );
 
         let result = match self.get_task_mut(index.clone()) {
@@ -979,7 +963,7 @@ impl Context {
                 task.set_notes(None);
                 Ok(())
             }
-            None => Err(format!("Task not found at index: {:?}", index)),
+            None => Err(format!("Task not found at index: {index:?}")),
         };
 
         PlanResponse::new(result, self.distilled_context().context())
@@ -1072,6 +1056,7 @@ pub struct DistilledContext {
 
 impl DistilledContext {
     /// Creates a new distilled context with the given components
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         usage_summary: String,
         task_tree: Vec<TaskTreeNode>,
@@ -1123,6 +1108,12 @@ pub struct Core {
     update_tx: Arc<tokio::sync::broadcast::Sender<PlanId>>,
 }
 
+impl Default for Core {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl Core {
     /// Creates a new Core instance, initializing with a default plan.
     pub fn new() -> Self {
@@ -1144,9 +1135,7 @@ impl Core {
         let mut plans = self.inner.write().map_err(|_| PlanError::LockError)?;
 
         // Get the mutable context for the given id
-        let context = plans
-            .get_mut(id)
-            .ok_or_else(|| PlanError::PlanNotFound(*id))?;
+        let context = plans.get_mut(id).ok_or(PlanError::PlanNotFound(*id))?;
 
         // Apply the function to the specific context
         let result = f(context);
@@ -1166,7 +1155,7 @@ impl Core {
         let plans = self.inner.read().map_err(|_| PlanError::LockError)?;
 
         // Get the immutable context for the given id
-        let context = plans.get(id).ok_or_else(|| PlanError::PlanNotFound(*id))?;
+        let context = plans.get(id).ok_or(PlanError::PlanNotFound(*id))?;
 
         // Apply the function
         let result = f(context);
@@ -1280,7 +1269,7 @@ impl Core {
             match inner_result {
                 Ok(success) => PlanResponse::new(success, distilled_context),
                 Err(e) => {
-                    eprintln!("Error completing task in plan {:?}: {}", id, e);
+                    eprintln!("Error completing task in plan {id:?}: {e}");
                     PlanResponse::new(false, distilled_context)
                 }
             }

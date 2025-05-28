@@ -38,7 +38,7 @@ impl Level {
             self.abstraction_focus,
             self.questions
                 .iter()
-                .map(|q| format!("- {}", q))
+                .map(|q| format!("- {q}"))
                 .collect::<Vec<_>>()
                 .join("\n")
         )

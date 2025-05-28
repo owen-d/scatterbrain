@@ -133,16 +133,14 @@ fn map_core_result_to_response<T: Serialize>(
         Err(PlanError::PlanNotFound(token)) => (
             StatusCode::NOT_FOUND,
             Json(ApiResponse::<PlanResponse<T>>::error(format!(
-                "Plan '{}' not found",
-                token
+                "Plan '{token}' not found"
             ))),
         )
             .into_response(),
         Err(e) => (
             StatusCode::INTERNAL_SERVER_ERROR,
             Json(ApiResponse::<PlanResponse<T>>::error(format!(
-                "Internal server error: {}",
-                e
+                "Internal server error: {e}"
             ))),
         )
             .into_response(),
@@ -155,17 +153,13 @@ fn map_core_result_simple<T: Serialize>(result: Result<T, PlanError>) -> Respons
         Ok(data) => (StatusCode::OK, Json(ApiResponse::success(data))).into_response(),
         Err(PlanError::PlanNotFound(token)) => (
             StatusCode::NOT_FOUND,
-            Json(ApiResponse::<T>::error(format!(
-                "Plan '{}' not found",
-                token
-            ))),
+            Json(ApiResponse::<T>::error(format!("Plan '{token}' not found"))),
         )
             .into_response(),
         Err(e) => (
             StatusCode::INTERNAL_SERVER_ERROR,
             Json(ApiResponse::<T>::error(format!(
-                "Internal server error: {}",
-                e
+                "Internal server error: {e}"
             ))),
         )
             .into_response(),
@@ -251,8 +245,7 @@ async fn list_plans_ui_handler(State(core): State<Core>) -> impl IntoResponse {
                 for id in plan_ids {
                     let id_val = id.value();
                     html_content.push_str(&format!(
-                        "<li><a href=\"/ui/{}\">Plan {}</a></li>",
-                        id_val, id_val
+                        "<li><a href=\"/ui/{id_val}\">Plan {id_val}</a></li>"
                     ));
                 }
                 html_content.push_str("</ul>");
@@ -266,8 +259,7 @@ async fn list_plans_ui_handler(State(core): State<Core>) -> impl IntoResponse {
             tracing::error!("Failed to list plans for UI: {}", e);
             // Return a user-friendly HTML error page
             Html(format!(
-                "<!DOCTYPE html><html><head><title>Error</title></head><body><h1>Error</h1><p>Could not load plan list: {}</p></body></html>",
-                e
+                "<!DOCTYPE html><html><head><title>Error</title></head><body><h1>Error</h1><p>Could not load plan list: {e}</p></body></html>"
             ))
         }
     }
@@ -354,9 +346,7 @@ async fn complete_task(
                 // Use the distilled context from the response even on failure
                 (
                     StatusCode::BAD_REQUEST, // Or another suitable code
-                    Json(ApiResponse::<PlanResponse<bool>>::error(format!(
-                        "Failed to complete task (lease mismatch, already complete, or other issue)"
-                    ))),
+                    Json(ApiResponse::<PlanResponse<bool>>::error("Failed to complete task (lease mismatch, already complete, or other issue)".to_string())),
                 )
                     .into_response()
             }
@@ -465,8 +455,7 @@ async fn remove_task_handler(
             return (
                 StatusCode::BAD_REQUEST,
                 Json(ApiResponse::<()>::error(format!(
-                    "Invalid index format: {}",
-                    e
+                    "Invalid index format: {e}"
                 ))),
             )
                 .into_response();
@@ -491,8 +480,7 @@ async fn get_notes_handler(
             // Return error using the standard helper, ensuring consistency
             // The type parameter here doesn't matter much as data will be None
             return map_core_result_to_response::<()>(Err(PlanError::Internal(format!(
-                "Invalid index format: {}",
-                e
+                "Invalid index format: {e}"
             ))));
         }
     };
@@ -516,8 +504,7 @@ async fn set_notes_handler(
             return (
                 StatusCode::BAD_REQUEST,
                 Json(ApiResponse::<()>::error(format!(
-                    "Invalid index format: {}",
-                    e
+                    "Invalid index format: {e}"
                 ))),
             )
                 .into_response();
@@ -552,8 +539,7 @@ async fn delete_notes_handler(
             return (
                 StatusCode::BAD_REQUEST,
                 Json(ApiResponse::<()>::error(format!(
-                    "Invalid index format: {}",
-                    e
+                    "Invalid index format: {e}"
                 ))),
             )
                 .into_response();
@@ -669,7 +655,7 @@ async fn ui_handler(State(core): State<Core>, Path(id): Path<u8>) -> impl IntoRe
     let all_ids = match core.list_plans() {
         Ok(ids) => ids,
         Err(e) => {
-            return Html(format!("<h1>Error loading plan list: {}</h1>", e)).into_response();
+            return Html(format!("<h1>Error loading plan list: {e}</h1>")).into_response();
         }
     };
     let current_plan_id = models::Lease::new(id); // Use constructor
@@ -700,21 +686,19 @@ async fn ui_handler(State(core): State<Core>, Path(id): Path<u8>) -> impl IntoRe
                 Err(e) => {
                     // Handle error fetching distilled context for the specific plan
                     Html(format!(
-                        "<h1>Error loading context for plan {:?}: {}</h1>",
-                        current_plan_id, e
+                        "<h1>Error loading context for plan {current_plan_id:?}: {e}</h1>"
                     ))
                     .into_response()
                 }
             }
         }
         Err(PlanError::PlanNotFound(_)) => {
-            Html(format!("<h1>Plan {:?} not found</h1>", current_plan_id)).into_response()
+            Html(format!("<h1>Plan {current_plan_id:?} not found</h1>")).into_response()
         }
         Err(e) => {
             // Handle other errors fetching the plan itself
             Html(format!(
-                "<h1>Error loading plan {:?}: {}</h1>",
-                current_plan_id, e
+                "<h1>Error loading plan {current_plan_id:?}: {e}</h1>"
             ))
             .into_response()
         }
@@ -765,7 +749,7 @@ fn render_ui_template(
         html.push_str("<div class='plan-notes'>");
         html.push_str("<h3>Notes:</h3>");
         let formatted_notes = html_escape::encode_text(notes).replace("\n", "<br>");
-        html.push_str(&format!("<p>{}</p>", formatted_notes));
+        html.push_str(&format!("<p>{formatted_notes}</p>"));
         html.push_str("</div>");
     }
     // --- End Display Plan Notes ---
@@ -776,8 +760,7 @@ fn render_ui_template(
 
     for (i, level) in plan.levels().iter().enumerate() {
         html.push_str(&format!(
-            "<div class='level-item'><span class='task-level level-{}'>{}</span>",
-            i, i
+            "<div class='level-item'><span class='task-level level-{i}'>{i}</span>"
         ));
         html.push_str(&format!(
             "<div class='level-description'><strong>{}</strong>",
@@ -795,13 +778,7 @@ fn render_ui_template(
     html.push_str("<h2>Plan</h2>");
 
     // Render tasks hierarchically
-    render_tasks_html(
-        &mut html,
-        &plan.root().subtasks(),
-        current,
-        plan,
-        Vec::new(),
-    );
+    render_tasks_html(&mut html, plan.root().subtasks(), current, plan, Vec::new());
 
     html.push_str("</div>");
 
@@ -895,7 +872,7 @@ fn render_tasks_html(
     html: &mut String,
     tasks: &[crate::models::Task],
     current: Option<&crate::models::Current>,
-    plan: &crate::models::Plan,
+    _plan: &crate::models::Plan,
     path: Vec<usize>,
 ) {
     if tasks.is_empty() {
@@ -930,12 +907,11 @@ fn render_tasks_html(
             ""
         };
 
-        html.push_str(&format!("<li class='{}'><div class='task-item'>", class));
+        html.push_str(&format!("<li class='{class}'><div class='task-item'>"));
 
         // Level indicator
         html.push_str(&format!(
-            "<span class='task-level level-{}'>{}</span>",
-            level_idx, level_idx
+            "<span class='task-level level-{level_idx}'>{level_idx}</span>"
         ));
 
         // Path identifier (e.g., 0.1.2)
@@ -957,7 +933,7 @@ fn render_tasks_html(
         // Add completion summary if available
         if task.is_completed() {
             if let Some(summary) = task.completion_summary() {
-                html.push_str(&format!("<span class='task-summary'>{}</span>", summary));
+                html.push_str(&format!("<span class='task-summary'>{summary}</span>"));
             }
         }
 
@@ -973,12 +949,12 @@ fn render_tasks_html(
         if let Some(notes) = task.notes() {
             // Escape HTML entities in notes
             let escaped_notes = html_escape::encode_text(notes);
-            html.push_str(&format!("<div class='task-notes'>{}</div>", escaped_notes));
+            html.push_str(&format!("<div class='task-notes'>{escaped_notes}</div>"));
         }
 
         // Render subtasks recursively
         if !task.subtasks().is_empty() {
-            render_tasks_html(html, task.subtasks(), current, plan, current_path);
+            render_tasks_html(html, task.subtasks(), current, _plan, current_path);
         }
 
         html.push_str("</li>");
@@ -1338,6 +1314,10 @@ mod tests {
     use serde_json::json;
     use tower::ServiceExt; // for `oneshot`
 
+    // Type aliases to simplify complex types in tests
+    type NotesResponse = PlanResponse<Result<Option<String>, String>>;
+    type NotesResult = (StatusCode, Option<NotesResponse>);
+
     // Helper to create a test Core and Router
     fn setup_test_app() -> (Core, Router) {
         let core = Core::new();
@@ -1397,8 +1377,7 @@ mod tests {
                     }
                 }
                 Err(e) => Err(format!(
-                    "Failed to parse success response: {}. Body: {}",
-                    e, body_str
+                    "Failed to parse success response: {e}. Body: {body_str}"
                 )),
             }
         } else {
@@ -1409,7 +1388,7 @@ mod tests {
                     api_resp.error.unwrap_or_default(),
                     status
                 )),
-                Err(_) => Err(format!("HTTP Error: {} Body: {}", status, body_str)),
+                Err(_) => Err(format!("HTTP Error: {status} Body: {body_str}")),
             }
         }
     }
@@ -1435,7 +1414,7 @@ mod tests {
             })
             .to_string(),
         );
-        let add_uri = format!("/api/plans/{}/task", plan_id);
+        let add_uri = format!("/api/plans/{plan_id}/task");
         let (_, add_resp_opt): (_, Option<PlanResponse<(models::Task, Index)>>) =
             request_json(&app, "POST", &add_uri, add_task_body)
                 .await
@@ -1452,13 +1431,11 @@ mod tests {
             .join(",");
 
         // 3. Get Notes (should be null/None initially)
-        let get_uri = format!("/api/plans/{}/notes/{}", plan_id, task_index_str);
-        let (status_get1, notes_resp1_opt): (
-            _,
-            Option<PlanResponse<Result<Option<String>, String>>>,
-        ) = request_json(&app, "GET", &get_uri, Body::empty())
-            .await
-            .expect("Failed to get initial notes");
+        let get_uri = format!("/api/plans/{plan_id}/notes/{task_index_str}");
+        let (status_get1, notes_resp1_opt): NotesResult =
+            request_json(&app, "GET", &get_uri, Body::empty())
+                .await
+                .expect("Failed to get initial notes");
         assert_eq!(status_get1, StatusCode::OK);
         assert_eq!(
             notes_resp1_opt
@@ -1471,7 +1448,7 @@ mod tests {
         // 4. Set Notes
         let notes_content = "These are my notes.\nWith a newline.".to_string();
         let set_body = Body::from(json!({ "notes": notes_content }).to_string());
-        let set_uri = format!("/api/plans/{}/notes/{}", plan_id, task_index_str);
+        let set_uri = format!("/api/plans/{plan_id}/notes/{task_index_str}");
         let (status_set, set_resp_opt): (_, Option<PlanResponse<Result<(), String>>>) =
             request_json(&app, "POST", &set_uri, set_body)
                 .await
@@ -1483,12 +1460,10 @@ mod tests {
             .is_ok());
 
         // 5. Get Notes (should be the set content)
-        let (status_get2, notes_resp2_opt): (
-            _,
-            Option<PlanResponse<Result<Option<String>, String>>>,
-        ) = request_json(&app, "GET", &get_uri, Body::empty())
-            .await
-            .expect("Failed to get set notes");
+        let (status_get2, notes_resp2_opt): NotesResult =
+            request_json(&app, "GET", &get_uri, Body::empty())
+                .await
+                .expect("Failed to get set notes");
         assert_eq!(status_get2, StatusCode::OK);
         assert_eq!(
             notes_resp2_opt
@@ -1520,7 +1495,7 @@ mod tests {
         */
 
         // 6. Delete Notes
-        let delete_uri = format!("/api/plans/{}/notes/{}", plan_id, task_index_str);
+        let delete_uri = format!("/api/plans/{plan_id}/notes/{task_index_str}");
         let (status_delete, delete_resp_opt): (_, Option<PlanResponse<Result<(), String>>>) =
             // Add Content-Length: 0 header to the DELETE request
             app.clone()
@@ -1555,12 +1530,10 @@ mod tests {
             .is_ok());
 
         // 7. Get Notes (should be null/None again)
-        let (status_get3, notes_resp3_opt): (
-            _,
-            Option<PlanResponse<Result<Option<String>, String>>>,
-        ) = request_json(&app, "GET", &get_uri, Body::empty())
-            .await
-            .expect("Failed to get notes after delete");
+        let (status_get3, notes_resp3_opt): NotesResult =
+            request_json(&app, "GET", &get_uri, Body::empty())
+                .await
+                .expect("Failed to get notes after delete");
         assert_eq!(status_get3, StatusCode::OK);
         assert_eq!(
             notes_resp3_opt
@@ -1592,7 +1565,7 @@ mod tests {
             })
             .to_string(),
         );
-        let add_uri = format!("/api/plans/{}/task", plan_id);
+        let add_uri = format!("/api/plans/{plan_id}/task");
         let (_, add_resp_opt): (_, Option<PlanResponse<(models::Task, Index)>>) =
             request_json(&app, "POST", &add_uri, add_task_body)
                 .await
@@ -1609,7 +1582,7 @@ mod tests {
             .join(","); // Should be "0"
 
         // --- Test 1: Delete Existing Notes ---
-        let delete_uri = format!("/api/plans/{}/notes/{}", plan_id, task_index_str);
+        let delete_uri = format!("/api/plans/{plan_id}/notes/{task_index_str}");
         let response1 = app
             .clone()
             .oneshot(
@@ -1651,7 +1624,7 @@ mod tests {
         );
 
         // --- Test 3: Delete Non-existent Notes (Bad Index) ---
-        let bad_delete_uri = format!("/api/plans/{}/notes/99", plan_id); // Invalid index
+        let bad_delete_uri = format!("/api/plans/{plan_id}/notes/99"); // Invalid index
         let response3 = app
             .clone()
             .oneshot(
