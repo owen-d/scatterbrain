@@ -1,0 +1,16 @@
+# General
+.DS_Store
+*.pem
+
+# Rust
+**/*.rs.bk
+/target
+Cargo.lock
+
+# Development tools
+.vscode/
+
+# git
+worktrees/
+
+**/.claude/settings.local.json
