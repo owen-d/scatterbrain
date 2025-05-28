@@ -57,14 +57,116 @@ pub enum ClientError {
     Internal(String),
 }
 
+/// Trait defining the API client interface for the scatterbrain service
+#[async_trait::async_trait]
+pub trait Client {
+    /// Get the full plan
+    async fn get_plan(&self, id: u8) -> Result<models::PlanResponse<models::Plan>, ClientError>;
+
+    /// Get the current task
+    async fn get_current(
+        &self,
+        id: u8,
+    ) -> Result<models::PlanResponse<Option<models::Current>>, ClientError>;
+
+    /// Get the distilled context
+    async fn get_distilled_context(&self, id: u8) -> Result<models::PlanResponse<()>, ClientError>;
+
+    /// Add a new task
+    async fn add_task(
+        &self,
+        id: u8,
+        description: String,
+        level_index: usize,
+        notes: Option<String>,
+    ) -> Result<models::PlanResponse<(models::Task, Index)>, ClientError>;
+
+    /// Complete the current task
+    async fn complete_task(
+        &self,
+        id: u8,
+        index: Index,
+        lease: Option<u8>,
+        force: bool,
+        summary: Option<String>,
+    ) -> Result<models::PlanResponse<bool>, ClientError>;
+
+    /// Move to a specific task
+    async fn move_to(
+        &self,
+        id: u8,
+        index: Index,
+    ) -> Result<models::PlanResponse<Option<String>>, ClientError>;
+
+    /// Change the abstraction level of a task
+    async fn change_level(
+        &self,
+        id: u8,
+        index: Index,
+        level_index: usize,
+    ) -> Result<models::PlanResponse<Result<(), String>>, ClientError>;
+
+    /// Generate a lease for a specific task
+    async fn generate_lease(
+        &self,
+        id: u8,
+        index: Index,
+    ) -> Result<models::PlanResponse<(models::Lease, Vec<String>)>, ClientError>;
+
+    /// Removes a task by its index
+    async fn remove_task(
+        &self,
+        id: u8,
+        index: Index,
+    ) -> Result<models::PlanResponse<Result<models::Task, String>>, ClientError>;
+
+    /// Gets the notes for a specific task
+    async fn get_task_notes(&self, id: u8, index: Index) -> Result<Option<String>, ClientError>;
+
+    /// Sets the notes for a specific task
+    async fn set_task_notes(
+        &self,
+        id: u8,
+        index: Index,
+        notes: String,
+    ) -> Result<models::PlanResponse<Result<(), String>>, ClientError>;
+
+    /// Deletes the notes for a specific task
+    async fn delete_task_notes(
+        &self,
+        id: u8,
+        index: Index,
+    ) -> Result<models::PlanResponse<Result<(), String>>, ClientError>;
+
+    /// Uncompletes a task by its index
+    async fn uncomplete_task(
+        &self,
+        id: u8,
+        index: Index,
+    ) -> Result<models::PlanResponse<Result<bool, String>>, ClientError>;
+
+    /// Create a new plan with an optional prompt and notes
+    async fn create_plan(
+        &self,
+        prompt: Option<String>,
+        notes: Option<String>,
+    ) -> Result<models::PlanId, ClientError>;
+
+    /// Delete a plan by its ID
+    async fn delete_plan(&self, id: u8) -> Result<(), ClientError>;
+
+    /// List all available plans
+    async fn list_plans(&self) -> Result<Vec<models::Lease>, ClientError>;
+}
+
 /// API client for the scatterbrain service
 #[derive(Debug, Clone)]
-pub struct Client {
+pub struct HttpClientImpl {
     http_client: ReqwestClient,
     config: ClientConfig,
 }
 
-impl Client {
+impl HttpClientImpl {
     /// Create a new client with default configuration
     pub fn new() -> Self {
         Self::with_config(ClientConfig::default())
@@ -133,18 +235,18 @@ impl Client {
             }
         }
     }
+}
 
+#[async_trait::async_trait]
+impl Client for HttpClientImpl {
     /// Get the full plan
-    pub async fn get_plan(
-        &self,
-        id: u8,
-    ) -> Result<models::PlanResponse<models::Plan>, ClientError> {
+    async fn get_plan(&self, id: u8) -> Result<models::PlanResponse<models::Plan>, ClientError> {
         let path = format!("/api/plans/{id}/plan");
         self.request(Method::GET, &path, None::<&()>).await
     }
 
     /// Get the current task
-    pub async fn get_current(
+    async fn get_current(
         &self,
         id: u8,
     ) -> Result<models::PlanResponse<Option<models::Current>>, ClientError> {
@@ -153,16 +255,13 @@ impl Client {
     }
 
     /// Get the distilled context
-    pub async fn get_distilled_context(
-        &self,
-        id: u8,
-    ) -> Result<models::PlanResponse<()>, ClientError> {
+    async fn get_distilled_context(&self, id: u8) -> Result<models::PlanResponse<()>, ClientError> {
         let path = format!("/api/plans/{id}/distilled");
         self.request(Method::GET, &path, None::<&()>).await
     }
 
     /// Add a new task
-    pub async fn add_task(
+    async fn add_task(
         &self,
         id: u8,
         description: String,
@@ -179,7 +278,7 @@ impl Client {
     }
 
     /// Complete the current task
-    pub async fn complete_task(
+    async fn complete_task(
         &self,
         id: u8,
         index: Index,
@@ -198,7 +297,7 @@ impl Client {
     }
 
     /// Move to a specific task
-    pub async fn move_to(
+    async fn move_to(
         &self,
         id: u8,
         index: Index,
@@ -209,7 +308,7 @@ impl Client {
     }
 
     /// Change the abstraction level of a task
-    pub async fn change_level(
+    async fn change_level(
         &self,
         id: u8,
         index: Index,
@@ -221,7 +320,7 @@ impl Client {
     }
 
     /// Generate a lease for a specific task
-    pub async fn generate_lease(
+    async fn generate_lease(
         &self,
         id: u8,
         index: Index,
@@ -232,7 +331,7 @@ impl Client {
     }
 
     /// Removes a task by its index
-    pub async fn remove_task(
+    async fn remove_task(
         &self,
         id: u8,
         index: Index,
@@ -247,11 +346,7 @@ impl Client {
     }
 
     /// Gets the notes for a specific task
-    pub async fn get_task_notes(
-        &self,
-        id: u8,
-        index: Index,
-    ) -> Result<Option<String>, ClientError> {
+    async fn get_task_notes(&self, id: u8, index: Index) -> Result<Option<String>, ClientError> {
         let index_str = index
             .iter()
             .map(|i| i.to_string())
@@ -262,7 +357,7 @@ impl Client {
     }
 
     /// Sets the notes for a specific task
-    pub async fn set_task_notes(
+    async fn set_task_notes(
         &self,
         id: u8,
         index: Index,
@@ -279,7 +374,7 @@ impl Client {
     }
 
     /// Deletes the notes for a specific task
-    pub async fn delete_task_notes(
+    async fn delete_task_notes(
         &self,
         id: u8,
         index: Index,
@@ -294,7 +389,7 @@ impl Client {
     }
 
     /// Uncompletes a task by its index
-    pub async fn uncomplete_task(
+    async fn uncomplete_task(
         &self,
         id: u8,
         index: Index,
@@ -304,29 +399,29 @@ impl Client {
         self.request(Method::POST, &path, Some(&body)).await
     }
 
-    /// Create a new plan with an optional prompt and notes.
-    pub async fn create_plan(
+    /// Create a new plan with an optional prompt and notes
+    async fn create_plan(
         &self,
         prompt: Option<String>,
         notes: Option<String>,
     ) -> Result<models::PlanId, ClientError> {
-        // Use CreatePlanRequest struct, now assuming it has prompt and notes
         let body = CreatePlanRequest { prompt, notes };
-        // Use the existing helper method
         self.request(Method::POST, "/api/plans", Some(&body)).await
     }
 
-    pub async fn delete_plan(&self, id: u8) -> Result<(), ClientError> {
+    /// Delete a plan by its ID
+    async fn delete_plan(&self, id: u8) -> Result<(), ClientError> {
         let path = format!("/api/plans/{id}");
         self.request(Method::DELETE, &path, None::<&()>).await
     }
 
-    pub async fn list_plans(&self) -> Result<Vec<models::Lease>, ClientError> {
+    /// List all available plans
+    async fn list_plans(&self) -> Result<Vec<models::Lease>, ClientError> {
         self.request(Method::GET, "/api/plans", None::<&()>).await
     }
 }
 
-impl Default for Client {
+impl Default for HttpClientImpl {
     fn default() -> Self {
         Self::new()
     }

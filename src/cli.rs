@@ -8,7 +8,7 @@ use colored::Colorize;
 use std::io; // Import env module // Import the Colorize trait
 
 use crate::{
-    api::{serve, Client, ClientConfig, ClientError, ServerConfig},
+    api::{serve, Client, ClientConfig, ClientError, HttpClientImpl, ServerConfig},
     models::{parse_index, Core, Current, PlanError, PlanId, DEFAULT_PLAN_ID},
 };
 
@@ -592,11 +592,11 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
     }
 }
 
-fn create_client(server_url: &str) -> Client {
+fn create_client(server_url: &str) -> HttpClientImpl {
     let config = ClientConfig {
         base_url: server_url.to_string(),
     };
-    Client::with_config(config)
+    HttpClientImpl::with_config(config)
 }
 
 /// Generic function to print any PlanResponse<T>

@@ -20,6 +20,7 @@ futures = "0.3"
 chrono = { version = "0.4.38", features = ["serde"] }
 rand = { version = "0.8.5", features = ["std_rng"] }
 lazy_static = "1.4.0"
+async-trait = "0.1"
 
 # For CLI output coloring
 colored = "2.1"
