@@ -1,0 +1,11 @@
+{
+  "mcpServers": {
+    "scatterbrain": {
+      "command": "scatterbrain",
+      "args": [
+        "mcp"
+      ],
+      "env": {}
+    }
+  }
+}
