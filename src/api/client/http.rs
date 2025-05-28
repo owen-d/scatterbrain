@@ -1,6 +1,6 @@
-//! API client module
+//! HTTP client implementation
 //!
-//! This module provides HTTP client functionality to interact with the scatterbrain API server.
+//! This module provides the HTTP client implementation for the scatterbrain API.
 
 use reqwest::{
     header::{HeaderMap, HeaderValue, CONTENT_TYPE},
@@ -8,10 +8,11 @@ use reqwest::{
 };
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 
+use super::Client;
 use crate::models::{self, Index};
 
 // Import the request structs from the server module
-use super::server::{
+use crate::api::server::{
     AddTaskRequest, ChangeLevelRequest, CompleteTaskRequest, CreatePlanRequest, LeaseRequest,
     MoveToRequest, SetTaskNotesRequest, UncompleteTaskRequest,
 };
@@ -55,108 +56,6 @@ pub enum ClientError {
 
     #[error("Internal client error: {0}")]
     Internal(String),
-}
-
-/// Trait defining the API client interface for the scatterbrain service
-#[async_trait::async_trait]
-pub trait Client {
-    /// Get the full plan
-    async fn get_plan(&self, id: u8) -> Result<models::PlanResponse<models::Plan>, ClientError>;
-
-    /// Get the current task
-    async fn get_current(
-        &self,
-        id: u8,
-    ) -> Result<models::PlanResponse<Option<models::Current>>, ClientError>;
-
-    /// Get the distilled context
-    async fn get_distilled_context(&self, id: u8) -> Result<models::PlanResponse<()>, ClientError>;
-
-    /// Add a new task
-    async fn add_task(
-        &self,
-        id: u8,
-        description: String,
-        level_index: usize,
-        notes: Option<String>,
-    ) -> Result<models::PlanResponse<(models::Task, Index)>, ClientError>;
-
-    /// Complete the current task
-    async fn complete_task(
-        &self,
-        id: u8,
-        index: Index,
-        lease: Option<u8>,
-        force: bool,
-        summary: Option<String>,
-    ) -> Result<models::PlanResponse<bool>, ClientError>;
-
-    /// Move to a specific task
-    async fn move_to(
-        &self,
-        id: u8,
-        index: Index,
-    ) -> Result<models::PlanResponse<Option<String>>, ClientError>;
-
-    /// Change the abstraction level of a task
-    async fn change_level(
-        &self,
-        id: u8,
-        index: Index,
-        level_index: usize,
-    ) -> Result<models::PlanResponse<Result<(), String>>, ClientError>;
-
-    /// Generate a lease for a specific task
-    async fn generate_lease(
-        &self,
-        id: u8,
-        index: Index,
-    ) -> Result<models::PlanResponse<(models::Lease, Vec<String>)>, ClientError>;
-
-    /// Removes a task by its index
-    async fn remove_task(
-        &self,
-        id: u8,
-        index: Index,
-    ) -> Result<models::PlanResponse<Result<models::Task, String>>, ClientError>;
-
-    /// Gets the notes for a specific task
-    async fn get_task_notes(&self, id: u8, index: Index) -> Result<Option<String>, ClientError>;
-
-    /// Sets the notes for a specific task
-    async fn set_task_notes(
-        &self,
-        id: u8,
-        index: Index,
-        notes: String,
-    ) -> Result<models::PlanResponse<Result<(), String>>, ClientError>;
-
-    /// Deletes the notes for a specific task
-    async fn delete_task_notes(
-        &self,
-        id: u8,
-        index: Index,
-    ) -> Result<models::PlanResponse<Result<(), String>>, ClientError>;
-
-    /// Uncompletes a task by its index
-    async fn uncomplete_task(
-        &self,
-        id: u8,
-        index: Index,
-    ) -> Result<models::PlanResponse<Result<bool, String>>, ClientError>;
-
-    /// Create a new plan with an optional prompt and notes
-    async fn create_plan(
-        &self,
-        prompt: Option<String>,
-        notes: Option<String>,
-    ) -> Result<models::PlanId, ClientError>;
-
-    /// Delete a plan by its ID
-    async fn delete_plan(&self, id: u8) -> Result<(), ClientError>;
-
-    /// List all available plans
-    async fn list_plans(&self) -> Result<Vec<models::Lease>, ClientError>;
 }
 
 /// API client for the scatterbrain service
