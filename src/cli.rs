@@ -8,7 +8,10 @@ use colored::Colorize;
 use std::io; // Import env module // Import the Colorize trait
 
 use crate::{
-    api::{serve, Client, ClientConfig, ClientError, HttpClientImpl, ServerConfig},
+    api::{
+        serve, Client, ClientConfig, ClientError, HttpClientImpl, ScatterbrainMcpServer,
+        ServerConfig,
+    },
     models::{parse_index, Core, Current, PlanError, PlanId, DEFAULT_PLAN_ID},
 };
 
@@ -39,6 +42,13 @@ enum Commands {
         port: u16,
 
         /// Populate with example task tree for UI testing
+        #[arg(long)]
+        example: bool,
+    },
+
+    /// Start the scatterbrain MCP server
+    Mcp {
+        /// Populate with example task tree for testing
         #[arg(long)]
         example: bool,
     },
@@ -218,6 +228,41 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
 
             // Start the API server
             serve(core, config).await?;
+            Ok(())
+        }
+
+        Commands::Mcp { example } => {
+            println!("Starting scatterbrain MCP server...");
+
+            // Core::new() now initializes the default plan
+            let core = Core::new();
+
+            // Add example tasks if requested
+            if *example {
+                println!("Populating with example task tree for testing...");
+                // Create a default plan first
+                match core.create_plan(
+                    Some("Example MCP Plan".to_string()),
+                    Some("Example plan for testing MCP server functionality".to_string()),
+                ) {
+                    Ok(plan_id) => {
+                        create_example_tasks_for_plan(&core, &plan_id);
+                    }
+                    Err(e) => {
+                        eprintln!("Error creating default plan: {e}");
+                    }
+                }
+            }
+
+            // Create the MCP server
+            let mcp_server = ScatterbrainMcpServer::new(core);
+
+            // Start the MCP server with stdio transport
+            use rmcp::{transport::io::stdio, ServiceExt};
+            let service = mcp_server.serve(stdio()).await?;
+
+            println!("MCP server started. Waiting for connections...");
+            service.waiting().await?;
             Ok(())
         }
 
@@ -1098,9 +1143,14 @@ fn print_task_tree(_nodes: &[crate::models::TaskTreeNode], indent: usize) {
 
 /// Creates an example task tree for UI testing, operating on the default plan within the Core.
 fn create_example_tasks(core: &Core) {
-    // Access the context for the default plan ID
+    create_example_tasks_for_plan(core, &DEFAULT_PLAN_ID);
+}
+
+/// Creates an example task tree for the specified plan ID.
+fn create_example_tasks_for_plan(core: &Core, plan_id: &PlanId) {
+    // Access the context for the specified plan ID
     let result: Result<Result<(), PlanError>, PlanError> =
-        core.with_plan_context(&DEFAULT_PLAN_ID, |context| {
+        core.with_plan_context(plan_id, |context| {
             // Create top-level tasks (level 0 - Business Strategy)
             let result = context.add_task("Build Web Application".to_string(), 0, None);
             let (_, idx_root) = result.into_inner(); // Keep root index

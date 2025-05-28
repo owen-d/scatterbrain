@@ -25,6 +25,8 @@ async-trait = "0.1"
 # For CLI output coloring
 colored = "2.1"
 html-escape = "0.2"
+rmcp = { version = "0.1.5", features = ["transport-io", "server"] }
+rmcp-macros = "0.1.5"
 
 # The library portion of the crate
 [lib]
