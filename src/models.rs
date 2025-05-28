@@ -896,17 +896,17 @@ impl Context {
         let goal = self.plan.goal.clone();
         let plan_notes = self.plan.notes.clone(); // Clone plan notes
 
-        // Create the distilled context with all components using the new constructor
-        let distilled = DistilledContext::new(
-            usage_summary,
-            task_tree,
-            current_task_opt,
-            current_level,
-            levels,
-            self.history.iter().cloned().collect(),
-            goal,
-            plan_notes, // Pass plan notes
-        );
+        // Create the distilled context with all components using the builder pattern
+        let distilled = DistilledContext::builder()
+            .usage_summary(usage_summary)
+            .task_tree(task_tree)
+            .current_task(current_task_opt)
+            .current_level(current_level)
+            .levels(levels)
+            .transition_history(self.history.iter().cloned().collect())
+            .goal(goal)
+            .plan_notes(plan_notes)
+            .build();
 
         PlanResponse::new((), distilled)
     }
@@ -1055,27 +1055,88 @@ pub struct DistilledContext {
 }
 
 impl DistilledContext {
-    /// Creates a new distilled context with the given components
-    #[allow(clippy::too_many_arguments)]
-    pub fn new(
-        usage_summary: String,
-        task_tree: Vec<TaskTreeNode>,
-        current_task: Option<Task>,
-        current_level: Option<Level>,
-        levels: Vec<Level>,
-        transition_history: Vec<TransitionLogEntry>,
-        goal: Option<String>,
-        plan_notes: Option<String>,
-    ) -> Self {
+    /// Creates a new builder for DistilledContext
+    pub fn builder() -> DistilledContextBuilder {
+        DistilledContextBuilder::new()
+    }
+}
+
+/// Builder for DistilledContext to avoid too many constructor arguments
+pub struct DistilledContextBuilder {
+    usage_summary: Option<String>,
+    task_tree: Option<Vec<TaskTreeNode>>,
+    current_task: Option<Task>,
+    current_level: Option<Level>,
+    levels: Option<Vec<Level>>,
+    transition_history: Option<Vec<TransitionLogEntry>>,
+    goal: Option<String>,
+    plan_notes: Option<String>,
+}
+
+impl DistilledContextBuilder {
+    fn new() -> Self {
         Self {
-            usage_summary,
-            task_tree,
-            current_task,
-            current_level,
-            levels,
-            transition_history,
-            goal,
-            plan_notes,
+            usage_summary: None,
+            task_tree: None,
+            current_task: None,
+            current_level: None,
+            levels: None,
+            transition_history: None,
+            goal: None,
+            plan_notes: None,
+        }
+    }
+
+    pub fn usage_summary(mut self, usage_summary: String) -> Self {
+        self.usage_summary = Some(usage_summary);
+        self
+    }
+
+    pub fn task_tree(mut self, task_tree: Vec<TaskTreeNode>) -> Self {
+        self.task_tree = Some(task_tree);
+        self
+    }
+
+    pub fn current_task(mut self, current_task: Option<Task>) -> Self {
+        self.current_task = current_task;
+        self
+    }
+
+    pub fn current_level(mut self, current_level: Option<Level>) -> Self {
+        self.current_level = current_level;
+        self
+    }
+
+    pub fn levels(mut self, levels: Vec<Level>) -> Self {
+        self.levels = Some(levels);
+        self
+    }
+
+    pub fn transition_history(mut self, transition_history: Vec<TransitionLogEntry>) -> Self {
+        self.transition_history = Some(transition_history);
+        self
+    }
+
+    pub fn goal(mut self, goal: Option<String>) -> Self {
+        self.goal = goal;
+        self
+    }
+
+    pub fn plan_notes(mut self, plan_notes: Option<String>) -> Self {
+        self.plan_notes = plan_notes;
+        self
+    }
+
+    pub fn build(self) -> DistilledContext {
+        DistilledContext {
+            usage_summary: self.usage_summary.unwrap_or_default(),
+            task_tree: self.task_tree.unwrap_or_default(),
+            current_task: self.current_task,
+            current_level: self.current_level,
+            levels: self.levels.unwrap_or_default(),
+            transition_history: self.transition_history.unwrap_or_default(),
+            goal: self.goal,
+            plan_notes: self.plan_notes,
         }
     }
 }
