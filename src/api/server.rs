@@ -168,9 +168,6 @@ fn map_core_result_simple<T: Serialize>(result: Result<T, PlanError>) -> Respons
 
 /// Starts the API server
 pub async fn serve(core: Core, config: ServerConfig) -> Result<(), Box<dyn std::error::Error>> {
-    // Initialize tracing
-    tracing_subscriber::fmt::init();
-
     // CORS configuration
     let cors = CorsLayer::new()
         .allow_origin(Any)

@@ -213,15 +213,21 @@ enum PlanCommands {
 pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
     let cli = Cli::parse();
 
+    if !matches!(&cli.command, Commands::Mcp { .. }) {
+        // Initialize tracing, only for non-MCP commands
+        // as MCP expects clean stdout
+        tracing_subscriber::fmt::init();
+    }
+
     match &cli.command {
         Commands::Serve { port, example } => {
-            println!("Starting scatterbrain API server on port {port}...");
+            tracing::info!("Starting scatterbrain API server on port {port}");
 
             // Core::new() now initializes the default plan
             let core = Core::new();
             // Add example tasks if requested (needs adjustment if Core API changes)
             if *example {
-                println!("Populating with example task tree for UI testing...");
+                tracing::info!("Populating with example task tree for UI testing");
                 create_example_tasks(&core);
             }
 
@@ -236,14 +242,14 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
         }
 
         Commands::Mcp { example, expose } => {
-            println!("Starting scatterbrain MCP server...");
+            tracing::info!("Starting scatterbrain MCP server");
 
             // Core::new() now initializes the default plan
             let core = Core::new();
 
             // Add example tasks if requested
             if *example {
-                println!("Populating with example task tree for testing...");
+                tracing::info!("Populating with example task tree for testing");
                 // Create a default plan first
                 match core.create_plan(
                     "Example MCP Plan".to_string(),
@@ -253,7 +259,7 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
                         create_example_tasks_for_plan(&core, &plan_id);
                     }
                     Err(e) => {
-                        eprintln!("Error creating default plan: {e}");
+                        tracing::error!("Error creating default plan: {e}");
                     }
                 }
             }
@@ -263,7 +269,7 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
 
             // If expose flag is provided, start HTTP server concurrently
             if let Some(port) = expose {
-                println!("Also exposing HTTP API server on port {port}...");
+                tracing::info!("Also exposing HTTP API server on port {port}");
 
                 // Create server configuration
                 let config = ServerConfig {
@@ -275,7 +281,7 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
                 let mcp_service = mcp_server.serve(stdio());
                 let http_server = serve(core, config);
 
-                println!("MCP server started with HTTP API exposed on port {port}. Waiting for connections...");
+                tracing::info!("MCP server started with HTTP API exposed on port {port}. Waiting for connections");
 
                 // Run both servers concurrently
                 let mcp_handle = tokio::spawn(async move {
@@ -299,16 +305,16 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
                 tokio::select! {
                     result = mcp_handle => {
                         match result {
-                            Ok(Ok(())) => println!("MCP server completed successfully"),
-                            Ok(Err(e)) => eprintln!("MCP server error: {e}"),
-                            Err(e) => eprintln!("MCP server task error: {e}"),
+                            Ok(Ok(())) => tracing::info!("MCP server completed successfully"),
+                            Ok(Err(e)) => tracing::error!("MCP server error: {e}"),
+                            Err(e) => tracing::error!("MCP server task error: {e}"),
                         }
                     }
                     result = http_handle => {
                         match result {
-                            Ok(Ok(())) => println!("HTTP server completed successfully"),
-                            Ok(Err(e)) => eprintln!("HTTP server error: {e}"),
-                            Err(e) => eprintln!("HTTP server task error: {e}"),
+                            Ok(Ok(())) => tracing::info!("HTTP server completed successfully"),
+                            Ok(Err(e)) => tracing::error!("HTTP server error: {e}"),
+                            Err(e) => tracing::error!("HTTP server task error: {e}"),
                         }
                     }
                 }
@@ -317,7 +323,7 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
                 use rmcp::{transport::io::stdio, ServiceExt};
                 let service = mcp_server.serve(stdio()).await?;
 
-                println!("MCP server started. Waiting for connections...");
+                tracing::info!("MCP server started. Waiting for connections");
                 service.waiting().await?;
             }
             Ok(())
@@ -354,7 +360,7 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
                     let target_index = match parse_index(index) {
                         Ok(idx) => idx,
                         Err(e) => {
-                            eprintln!("Error parsing index: {e}");
+                            tracing::error!("Error parsing index: {e}");
                             return Err(e);
                         }
                     };
@@ -434,12 +440,14 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
                                     index // Use original string for display
                                 ),
                                 Err(e) => {
-                                    eprintln!("Server error removing task at index {index}: {e}")
+                                    tracing::error!(
+                                        "Server error removing task at index {index}: {e}"
+                                    )
                                 }
                             });
                         }
                         Err(e) => {
-                            eprintln!("Client error removing task: {e}");
+                            tracing::error!("Client error removing task: {e}");
                         }
                     };
                     Ok(())
@@ -455,13 +463,13 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
                                 Ok(false) => {
                                     println!("Task at index {index} was already incomplete.")
                                 }
-                                Err(e) => eprintln!(
+                                Err(e) => tracing::error!(
                                     "Server error uncompleting task at index {index}: {e}"
                                 ),
                             });
                         }
                         Err(e) => {
-                            eprintln!("Client error uncompleting task: {e}");
+                            tracing::error!("Client error uncompleting task: {e}");
                         }
                     };
                     Ok(())
@@ -481,7 +489,7 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
                                     }
                                 }
                                 Err(e) => {
-                                    eprintln!("Error getting notes: {e}");
+                                    tracing::error!("Error getting notes: {e}");
                                 }
                             }
                             Ok(())
@@ -497,7 +505,7 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
                                     println!("Notes for task at index {index} set successfully.")
                                 }
                                 Err(e) => {
-                                    eprintln!("Error setting notes for task {index}: {e}")
+                                    tracing::error!("Error setting notes for task {index}: {e}")
                                 }
                             });
                             Ok(())
@@ -512,7 +520,7 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
                                     "Notes for task at index {index} deleted successfully."
                                 ),
                                 Err(e) => {
-                                    eprintln!("Error deleting notes for task {index}: {e}")
+                                    tracing::error!("Error deleting notes for task {index}: {e}")
                                 }
                             });
                             Ok(())
@@ -599,8 +607,8 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
                             print_distilled_context_response(&distilled_response);
                         }
                         Err(e) => {
-                            eprintln!(
-                                "Warning: Could not fetch context for default plan {}: {}",
+                            tracing::warn!(
+                                "Could not fetch context for default plan {}: {}",
                                 default_id.value(),
                                 e
                             );
@@ -638,7 +646,7 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
                             println!("---\n");
                             print_guide(); // Print the full guide
                         }
-                        Err(e) => eprintln!("Error creating plan: {e}"),
+                        Err(e) => tracing::error!("Error creating plan: {e}"),
                     }
                     Ok(())
                 }
@@ -649,9 +657,9 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
                     match client.delete_plan(*id).await {
                         Ok(_) => println!("Deleted plan with ID: {id}"),
                         Err(ClientError::PlanNotFound(_)) => {
-                            eprintln!("Error: Plan with ID '{id}' not found.")
+                            tracing::error!("Plan with ID '{id}' not found")
                         }
-                        Err(e) => eprintln!("Error deleting plan '{id}': {e}"),
+                        Err(e) => tracing::error!("Error deleting plan '{id}': {e}"),
                     }
                     Ok(())
                 }
@@ -668,7 +676,7 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
                                 }
                             }
                         }
-                        Err(e) => eprintln!("Error listing plans: {e}"),
+                        Err(e) => tracing::error!("Error listing plans: {e}"),
                     }
                     Ok(())
                 }
