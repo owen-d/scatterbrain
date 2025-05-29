@@ -74,3 +74,13 @@ targets = [
 pr-run-mode = "plan"
 # Whether to install an updater program
 install-updater = false
+
+# Fix Ubuntu 20.04 deprecation by specifying ubuntu-22.04 for all runners
+[workspace.metadata.dist.github-custom-runners]
+global = "ubuntu-22.04"
+
+[workspace.metadata.dist.github-custom-runners.x86_64-unknown-linux-gnu]
+runner = "ubuntu-22.04"
+
+[workspace.metadata.dist.github-custom-runners.aarch64-unknown-linux-gnu]
+runner = "ubuntu-22.04"

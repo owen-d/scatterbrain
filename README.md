@@ -50,7 +50,7 @@ cargo install --path .
 
 #### For Cursor
 
-Add to your Cursor MCP configuration:
+Once installed, all you need to do is add the following to your Cursor MCP configuration:
 
 ```json
 {
