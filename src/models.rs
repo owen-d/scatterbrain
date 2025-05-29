@@ -42,6 +42,15 @@ pub struct Task {
 
 impl Task {
     /// Creates a new task with the given level and description
+    ///
+    /// # Examples
+    /// ```
+    /// # use scatterbrain::models::Task;
+    /// let task = Task::new("Write documentation".to_string());
+    /// assert_eq!(task.description(), "Write documentation");
+    /// assert!(!task.is_completed());
+    /// assert_eq!(task.level_index(), None);
+    /// ```
     pub fn new(description: String) -> Self {
         Self {
             description,
@@ -54,6 +63,15 @@ impl Task {
     }
 
     /// Creates a new task with a specific level index
+    ///
+    /// # Examples
+    /// ```
+    /// # use scatterbrain::models::Task;
+    /// let task = Task::with_level("Implement feature".to_string(), 2);
+    /// assert_eq!(task.description(), "Implement feature");
+    /// assert!(!task.is_completed());
+    /// assert_eq!(task.level_index(), Some(2));
+    /// ```
     pub fn with_level(description: String, level_index: usize) -> Self {
         Self {
             description,
@@ -146,6 +164,15 @@ impl TransitionLogEntry {
 }
 
 #[derive(Clone, Serialize, Deserialize)]
+/// Represents a hierarchical plan with tasks organized across multiple abstraction levels.
+///
+/// A `Plan` contains a tree of tasks starting from a root task, along with a set of abstraction
+/// levels that guide how tasks should be organized and approached. Each plan can have an
+/// optional goal description and notes for additional context.
+///
+/// Plans are the core organizational unit in Scatterbrain, allowing complex work to be
+/// broken down into manageable, hierarchical tasks that can be navigated and completed
+/// systematically.
 pub struct Plan {
     root: Task,
     levels: Vec<Level>,
@@ -156,6 +183,18 @@ pub struct Plan {
 
 impl Plan {
     /// Creates a new plan with the given levels and an optional goal
+    ///
+    /// # Examples
+    /// ```
+    /// # use scatterbrain::models::{Plan, Level};
+    /// let levels = vec![
+    ///     Level::new("Planning".to_string(), "High level".to_string(), vec![], "Plan guidance".to_string()),
+    ///     Level::new("Implementation".to_string(), "Low level".to_string(), vec![], "Impl guidance".to_string()),
+    /// ];
+    /// let plan = Plan::new(levels, Some("Build a feature".to_string()), None);
+    /// assert_eq!(plan.goal, Some("Build a feature".to_string()));
+    /// assert_eq!(plan.level_count(), 2);
+    /// ```
     pub fn new(levels: Vec<Level>, goal: Option<String>, notes: Option<String>) -> Self {
         Self {
             root: Task::new("root".to_string()),
@@ -221,6 +260,25 @@ impl Plan {
 pub type Index = Vec<usize>;
 
 /// Parses a string representation of an index (e.g., "0,1,2") into an Index
+/// Parses a string representation of an index into an `Index` vector.
+///
+/// Takes a comma-separated string of numbers (e.g., "0,1,2") and converts it into
+/// a vector of `usize` values representing a path through the task hierarchy.
+/// Each number represents the index of a task at that level of the hierarchy.
+///
+/// # Arguments
+/// * `index_str` - A comma-separated string of non-negative integers
+///
+/// # Returns
+/// * `Ok(Index)` - A vector of indices representing the path
+/// * `Err(Box<dyn std::error::Error>)` - If parsing fails due to invalid format
+///
+/// # Examples
+/// ```
+/// # use scatterbrain::models::parse_index;
+/// let index = parse_index("0,1,2").unwrap();
+/// assert_eq!(index, vec![0, 1, 2]);
+/// ```
 pub fn parse_index(index_str: &str) -> Result<Index, Box<dyn std::error::Error>> {
     let parts: Result<Vec<usize>, _> = index_str
         .split(',')
@@ -257,6 +315,15 @@ impl fmt::Display for Lease {
 }
 
 /// Context for managing the planning process for a *single* plan
+/// Context for managing the planning process for a single plan.
+///
+/// The `Context` manages the state and operations for a single plan, including the current
+/// cursor position, transition history, lease management, and random number generation.
+/// It provides methods for navigating through tasks, adding/removing tasks, completing work,
+/// and tracking the history of operations performed on the plan.
+///
+/// Each `Context` is associated with exactly one plan and maintains all the runtime state
+/// needed to interact with that plan's task hierarchy.
 pub struct Context {
     plan: Plan,
     cursor: Index,
@@ -270,6 +337,16 @@ const MAX_HISTORY_SIZE: usize = 20;
 
 impl Context {
     /// Creates a new context with the given plan
+    ///
+    /// # Examples
+    /// ```
+    /// # use scatterbrain::models::{Context, Plan};
+    /// # use scatterbrain::levels::default_levels;
+    /// let plan = Plan::new(default_levels(), Some("Test goal".to_string()), None);
+    /// let context = Context::new(plan);
+    /// let current_index = context.get_current_index();
+    /// assert!(current_index.inner().is_empty()); // Starts at root
+    /// ```
     pub fn new(plan: Plan) -> Self {
         Self {
             plan,
@@ -970,11 +1047,16 @@ impl Context {
     }
 }
 
-/// Represents a unique identifier for a plan instance.
-// Use Lease as the PlanId
+/// Type alias for plan identifiers.
+///
+/// `PlanId` is used to uniquely identify plans within the system. It's implemented
+/// as a `Lease` to provide unique, non-colliding identifiers for plan instances.
 pub type PlanId = Lease;
 
-/// Error type for plan operations.
+/// Errors that can occur during plan operations.
+///
+/// This enum represents the various error conditions that can arise when working with plans,
+/// including cases where plans are not found, lock acquisition fails, or internal errors occur.
 #[derive(Error, Debug, Clone, Serialize, Deserialize)]
 pub enum PlanError {
     #[error("Plan with ID '{0:?}' not found")]
@@ -985,6 +1067,12 @@ pub enum PlanError {
     Internal(String),
 }
 
+/// A response wrapper for plan operations that includes context and metadata.
+///
+/// `PlanResponse` wraps the result of plan operations with additional context information,
+/// including suggested follow-up actions, reminders, and a distilled context that provides
+/// a comprehensive view of the current plan state. This allows clients to understand not
+/// just the result of an operation, but also the broader context and next steps.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PlanResponse<T> {
     pub res: T,
@@ -1025,7 +1113,13 @@ impl<T> PlanResponse<T> {
     }
 }
 
-#[derive(Clone, Serialize, Deserialize)]
+/// Represents the current task and its context within a plan.
+///
+/// `Current` provides a snapshot of the currently focused task, including its index position
+/// within the plan hierarchy, the abstraction level it belongs to, the task itself, and the
+/// history of parent task descriptions that led to this task. This gives a complete picture
+/// of where the user currently is within the plan structure.
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Current {
     pub index: Index,
     pub level: Level,
@@ -1033,8 +1127,16 @@ pub struct Current {
     pub history: Vec<String>,
 }
 
-/// Distilled context containing focused information about the current planning state
-#[derive(Clone, Serialize, Deserialize, Debug)]
+/// A comprehensive, distilled view of the current plan state and context.
+///
+/// `DistilledContext` provides a complete snapshot of a plan's current state, including
+/// the goal, usage information, task tree structure, current task details, abstraction levels,
+/// and recent history. This structure is designed to give users and systems a complete
+/// understanding of where they are in the planning process and what context is available.
+///
+/// This is typically included in `PlanResponse` objects to provide rich context alongside
+/// operation results.
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DistilledContext {
     /// The original goal of the plan, if any.
     pub goal: Option<String>,
@@ -1061,7 +1163,12 @@ impl DistilledContext {
     }
 }
 
-/// Builder for DistilledContext to avoid too many constructor arguments
+/// Builder pattern implementation for constructing `DistilledContext` objects.
+///
+/// `DistilledContextBuilder` provides a fluent interface for building `DistilledContext`
+/// instances with optional fields. This allows for flexible construction of context objects
+/// where not all fields may be available or relevant for a particular use case.
+#[derive(Default)]
 pub struct DistilledContextBuilder {
     usage_summary: Option<String>,
     task_tree: Option<Vec<TaskTreeNode>>,
@@ -1141,7 +1248,12 @@ impl DistilledContextBuilder {
     }
 }
 
-/// A node in the task tree for the distilled context
+/// Represents a node in the task tree structure for serialization and display.
+///
+/// `TaskTreeNode` provides a flattened representation of tasks within the hierarchical
+/// plan structure. It includes the task's essential information along with its position
+/// in the hierarchy and relationship to other tasks. This structure is used for
+/// serialization and providing tree views of the plan to clients.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct TaskTreeNode {
     /// The description of the task
@@ -1160,6 +1272,14 @@ pub struct TaskTreeNode {
     pub children: Vec<TaskTreeNode>,
 }
 
+/// Central coordination point for managing multiple plans with thread-safe access.
+///
+/// `Core` provides the main interface for creating, managing, and operating on multiple
+/// plans concurrently. It uses internal locking mechanisms to ensure thread-safe access
+/// to plan data and provides a broadcast channel for notifying subscribers of plan updates.
+///
+/// This is the primary entry point for plan management operations in multi-threaded
+/// environments, handling plan lifecycle, context management, and operation coordination.
 #[derive(Clone)]
 pub struct Core {
     // Use RwLock for better concurrency with multiple readers (API calls)
@@ -1176,7 +1296,22 @@ impl Default for Core {
 }
 
 impl Core {
-    /// Creates a new Core instance, initializing with a default plan.
+    /// Creates a new `Core` instance for managing plans.
+    ///
+    /// Initializes a new Core with an empty plan storage and sets up the broadcast
+    /// channel for plan update notifications. This is the primary entry point for
+    /// creating a plan management system.
+    ///
+    /// # Returns
+    /// A new `Core` instance ready to manage plans.
+    ///
+    /// # Examples
+    /// ```
+    /// # use scatterbrain::models::Core;
+    /// let core = Core::new();
+    /// let plans = core.list_plans().unwrap();
+    /// assert!(plans.is_empty()); // Starts with no plans
+    /// ```
     pub fn new() -> Self {
         // Create a broadcast channel for PlanId updates
         let (tx, _rx) = tokio::sync::broadcast::channel(100);
@@ -1226,6 +1361,29 @@ impl Core {
 
     /// Creates a new plan with the given goal and returns its unique ID (Lease).
     /// Handles potential collisions if a randomly generated u8 ID already exists.
+    /// Creates a new plan with the given goal and optional notes.
+    ///
+    /// Creates a new plan instance with default abstraction levels and assigns it a unique
+    /// identifier. The plan is stored in the Core's internal storage and can be accessed
+    /// using the returned `PlanId`. The method handles ID collisions by regenerating
+    /// random IDs until a unique one is found.
+    ///
+    /// # Arguments
+    /// * `goal` - A string describing the high-level goal or objective of the plan
+    /// * `notes` - Optional additional notes or context for the plan
+    ///
+    /// # Returns
+    /// * `Ok(PlanId)` - The unique identifier for the newly created plan
+    /// * `Err(PlanError)` - If plan creation fails due to lock acquisition errors
+    ///
+    /// # Examples
+    /// ```
+    /// # use scatterbrain::models::Core;
+    /// let core = Core::new();
+    /// let plan_id = core.create_plan("Build a web app".to_string(), Some("Using Rust".to_string())).unwrap();
+    /// let plan = core.get_plan(&plan_id).unwrap();
+    /// assert_eq!(plan.inner().goal, Some("Build a web app".to_string()));
+    /// ```
     pub fn create_plan(&self, goal: String, notes: Option<String>) -> Result<PlanId, PlanError> {
         let mut plans = self.inner.write().map_err(|_| PlanError::LockError)?;
 
@@ -1255,6 +1413,19 @@ impl Core {
 
     /// Deletes a plan context identified by its ID.
     // Use id: &PlanId instead of token: &PlanToken
+    /// Deletes a plan and all its associated data.
+    ///
+    /// Removes the plan identified by the given `PlanId` from the Core's storage.
+    /// This operation is irreversible and will permanently delete all tasks,
+    /// history, and other data associated with the plan.
+    ///
+    /// # Arguments
+    /// * `id` - The unique identifier of the plan to delete
+    ///
+    /// # Returns
+    /// * `Ok(())` - If the plan was successfully deleted
+    /// * `Err(PlanError::PlanNotFound)` - If no plan exists with the given ID
+    /// * `Err(PlanError::LockError)` - If lock acquisition fails
     pub fn delete_plan(&self, id: &PlanId) -> Result<(), PlanError> {
         let mut plans = self.inner.write().map_err(|_| PlanError::LockError)?;
 
