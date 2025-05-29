@@ -51,6 +51,10 @@ enum Commands {
         /// Populate with example task tree for testing
         #[arg(long)]
         example: bool,
+
+        /// Optionally expose HTTP API server on the specified port
+        #[arg(long)]
+        expose: Option<u16>,
     },
 
     /// Task management commands
@@ -231,7 +235,7 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
             Ok(())
         }
 
-        Commands::Mcp { example } => {
+        Commands::Mcp { example, expose } => {
             println!("Starting scatterbrain MCP server...");
 
             // Core::new() now initializes the default plan
@@ -255,14 +259,67 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
             }
 
             // Create the MCP server
-            let mcp_server = ScatterbrainMcpServer::new(core);
+            let mcp_server = ScatterbrainMcpServer::new(core.clone());
 
-            // Start the MCP server with stdio transport
-            use rmcp::{transport::io::stdio, ServiceExt};
-            let service = mcp_server.serve(stdio()).await?;
+            // If expose flag is provided, start HTTP server concurrently
+            if let Some(port) = expose {
+                println!("Also exposing HTTP API server on port {port}...");
 
-            println!("MCP server started. Waiting for connections...");
-            service.waiting().await?;
+                // Create server configuration
+                let config = ServerConfig {
+                    address: ([127, 0, 0, 1], *port).into(),
+                };
+
+                // Start both servers concurrently
+                use rmcp::{transport::io::stdio, ServiceExt};
+                let mcp_service = mcp_server.serve(stdio());
+                let http_server = serve(core, config);
+
+                println!("MCP server started with HTTP API exposed on port {port}. Waiting for connections...");
+
+                // Run both servers concurrently
+                let mcp_handle = tokio::spawn(async move {
+                    match mcp_service.await {
+                        Ok(service) => service
+                            .waiting()
+                            .await
+                            .map(|_| ())
+                            .map_err(|e| format!("MCP service error: {e}")),
+                        Err(e) => Err(format!("MCP server error: {e}")),
+                    }
+                });
+
+                let http_handle = tokio::spawn(async move {
+                    http_server
+                        .await
+                        .map_err(|e| format!("HTTP server error: {e}"))
+                });
+
+                // Wait for either server to complete (or fail)
+                tokio::select! {
+                    result = mcp_handle => {
+                        match result {
+                            Ok(Ok(())) => println!("MCP server completed successfully"),
+                            Ok(Err(e)) => eprintln!("MCP server error: {e}"),
+                            Err(e) => eprintln!("MCP server task error: {e}"),
+                        }
+                    }
+                    result = http_handle => {
+                        match result {
+                            Ok(Ok(())) => println!("HTTP server completed successfully"),
+                            Ok(Err(e)) => eprintln!("HTTP server error: {e}"),
+                            Err(e) => eprintln!("HTTP server task error: {e}"),
+                        }
+                    }
+                }
+            } else {
+                // Start only the MCP server with stdio transport
+                use rmcp::{transport::io::stdio, ServiceExt};
+                let service = mcp_server.serve(stdio()).await?;
+
+                println!("MCP server started. Waiting for connections...");
+                service.waiting().await?;
+            }
             Ok(())
         }
 
@@ -1195,6 +1252,42 @@ mod tests {
                 _ => panic!("Expected TaskCommands::Notes"),
             },
             _ => panic!("Expected Commands::Task"),
+        }
+    }
+
+    #[test]
+    fn test_cli_mcp_expose_flag() {
+        // Test MCP command without expose flag
+        let args_no_expose = vec!["scatterbrain", "mcp", "--example"];
+        let cli_no_expose = try_parse_args(&args_no_expose).unwrap();
+        match cli_no_expose.command {
+            Commands::Mcp { example, expose } => {
+                assert!(example);
+                assert_eq!(expose, None);
+            }
+            _ => panic!("Expected Commands::Mcp"),
+        }
+
+        // Test MCP command with expose flag
+        let args_with_expose = vec!["scatterbrain", "mcp", "--example", "--expose", "8080"];
+        let cli_with_expose = try_parse_args(&args_with_expose).unwrap();
+        match cli_with_expose.command {
+            Commands::Mcp { example, expose } => {
+                assert!(example);
+                assert_eq!(expose, Some(8080));
+            }
+            _ => panic!("Expected Commands::Mcp"),
+        }
+
+        // Test MCP command with only expose flag
+        let args_only_expose = vec!["scatterbrain", "mcp", "--expose", "3001"];
+        let cli_only_expose = try_parse_args(&args_only_expose).unwrap();
+        match cli_only_expose.command {
+            Commands::Mcp { example, expose } => {
+                assert!(!example);
+                assert_eq!(expose, Some(3001));
+            }
+            _ => panic!("Expected Commands::Mcp"),
         }
     }
 
