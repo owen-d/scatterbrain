@@ -93,10 +93,10 @@ pub trait Client {
         index: Index,
     ) -> Result<models::PlanResponse<Result<bool, String>>, ClientError>;
 
-    /// Create a new plan with an optional prompt and notes
+    /// Create a new plan with a required prompt and optional notes
     async fn create_plan(
         &self,
-        prompt: Option<String>,
+        prompt: String,
         notes: Option<String>,
     ) -> Result<models::PlanId, ClientError>;
 

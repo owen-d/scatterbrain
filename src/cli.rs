@@ -242,7 +242,7 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
                 println!("Populating with example task tree for testing...");
                 // Create a default plan first
                 match core.create_plan(
-                    Some("Example MCP Plan".to_string()),
+                    "Example MCP Plan".to_string(),
                     Some("Example plan for testing MCP server functionality".to_string()),
                 ) {
                     Ok(plan_id) => {
@@ -567,10 +567,7 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
             match plan_command {
                 PlanCommands::Create { prompt, notes } => {
                     // Pass the prompt and notes to the updated client method
-                    match client
-                        .create_plan(Some(prompt.clone()), notes.clone())
-                        .await
-                    {
+                    match client.create_plan(prompt.clone(), notes.clone()).await {
                         Ok(lease) => {
                             let new_id = lease.value(); // lease is PlanId
                             println!("Created new plan with ID: {new_id}");

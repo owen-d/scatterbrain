@@ -179,7 +179,7 @@ impl Client for CoreClient {
 
     async fn create_plan(
         &self,
-        prompt: Option<String>,
+        prompt: String,
         notes: Option<String>,
     ) -> Result<models::PlanId, ClientError> {
         self.core

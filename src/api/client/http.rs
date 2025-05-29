@@ -298,10 +298,10 @@ impl Client for HttpClientImpl {
         self.request(Method::POST, &path, Some(&body)).await
     }
 
-    /// Create a new plan with an optional prompt and notes
+    /// Create a new plan with a required prompt and optional notes
     async fn create_plan(
         &self,
-        prompt: Option<String>,
+        prompt: String,
         notes: Option<String>,
     ) -> Result<models::PlanId, ClientError> {
         let body = CreatePlanRequest { prompt, notes };

@@ -70,12 +70,14 @@ impl ScatterbrainMcpServer {
         to_mcp_result(result)
     }
 
-    #[tool(description = "Create a new plan with optional prompt and notes")]
+    #[tool(description = "Create a new plan with required prompt and optional notes")]
     async fn create_plan(
         &self,
         #[tool(param)] prompt: Option<String>,
         #[tool(param)] notes: Option<String>,
     ) -> Result<CallToolResult, McpError> {
+        let prompt = prompt
+            .ok_or_else(|| McpError::invalid_params("prompt is required".to_string(), None))?;
         let result = self.client.create_plan(prompt, notes).await;
         to_mcp_result(result)
     }

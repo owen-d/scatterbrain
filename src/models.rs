@@ -1226,11 +1226,7 @@ impl Core {
 
     /// Creates a new plan with the given goal and returns its unique ID (Lease).
     /// Handles potential collisions if a randomly generated u8 ID already exists.
-    pub fn create_plan(
-        &self,
-        goal: Option<String>,
-        notes: Option<String>,
-    ) -> Result<PlanId, PlanError> {
+    pub fn create_plan(&self, goal: String, notes: Option<String>) -> Result<PlanId, PlanError> {
         let mut plans = self.inner.write().map_err(|_| PlanError::LockError)?;
 
         let mut new_id_val;
@@ -1246,7 +1242,7 @@ impl Core {
 
         let new_id = Lease(new_id_val);
         // Create a new plan with the provided goal and notes
-        let plan = Plan::new(default_levels(), goal, notes);
+        let plan = Plan::new(default_levels(), Some(goal), notes);
         // Use a random seed for new plans, creating context directly with seed
         let new_context = Context::new_with_seed(plan, rand::random());
         plans.insert(new_id, new_context);
@@ -1805,9 +1801,7 @@ mod tests {
     #[test]
     fn test_core_notes_crud() {
         let core = Core::new();
-        let plan_id = core
-            .create_plan(Some("Test Plan".to_string()), None)
-            .unwrap();
+        let plan_id = core.create_plan("Test Plan".to_string(), None).unwrap();
 
         // 1. Add a task (initially no notes)
         let (_, task_index) = core
