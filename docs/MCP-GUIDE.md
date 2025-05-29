@@ -76,28 +76,8 @@ scatterbrain mcp --help
 }
 ```
 
-*[Screenshot placeholder: Cursor MCP settings page]*
+![Cursor MCP settings page](static/cursor_mcp_diagnostic.png)
 
-### Claude Desktop Configuration
-
-1. Locate Claude configuration file:
-   - **macOS**: `~/Library/Application Support/Claude/claude_desktop_config.json`
-   - **Windows**: `%APPDATA%\Claude\claude_desktop_config.json`
-
-2. Add scatterbrain configuration:
-
-```json
-{
-  "mcpServers": {
-    "scatterbrain": {
-      "command": "scatterbrain",
-      "args": ["mcp", "--example"]
-    }
-  }
-}
-```
-
-*[Screenshot placeholder: Claude Desktop with scatterbrain tools visible]*
 
 ### Other MCP-Compatible Assistants
 

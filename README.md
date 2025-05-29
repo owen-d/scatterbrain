@@ -63,23 +63,7 @@ Once installed, all you need to do is add the following to your Cursor MCP confi
 }
 ```
 
-
-#### Start MCP Server
-
-```bash
-# Basic MCP server
-scatterbrain mcp
-
-# With example data for testing
-scatterbrain mcp --example
-
-# With web UI exposed on port 8080
-scatterbrain mcp --expose 8080
-```
-
-*[Screenshot placeholder: MCP server running in terminal]*
-
-*[Screenshot placeholder: Cursor showing scatterbrain MCP tools]*
+![Cursor showing scatterbrain MCP tools](docs/static/cursor_mcp_diagnostic.png)
 
 ## ✨ Features
 
