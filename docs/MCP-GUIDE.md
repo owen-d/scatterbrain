@@ -36,7 +36,8 @@ The Model Context Protocol (MCP) allows AI assistants to interact with external 
 - Rust toolchain (1.70+)
 - AI assistant that supports MCP (Cursor, Claude Desktop, etc.)
 
-### Build Scatterbrain
+<details>
+<summary>Build from Source</summary>
 
 ```bash
 # Clone the repository
@@ -56,6 +57,8 @@ cargo install --path .
 scatterbrain --version
 scatterbrain mcp --help
 ```
+
+</details>
 
 ## AI Assistant Configuration
 
@@ -78,7 +81,6 @@ scatterbrain mcp --help
 
 ![Cursor MCP settings page](static/cursor_mcp_diagnostic.png)
 
-
 ### Other MCP-Compatible Assistants
 
 For any MCP-compatible AI assistant, use these connection details:
@@ -91,7 +93,8 @@ For any MCP-compatible AI assistant, use these connection details:
 
 Scatterbrain provides 17 MCP tools organized by functionality:
 
-### Plan Management
+<details>
+<summary>Plan Management Tools</summary>
 
 #### `create_plan`
 Create a new plan from a high-level prompt.
@@ -122,7 +125,10 @@ Remove a plan permanently.
 **Parameters:**
 - `plan_id` (number): The plan to delete
 
-### Task Management
+</details>
+
+<details>
+<summary>Task Management Tools</summary>
 
 #### `add_task`
 Add a new task to the current plan.
@@ -163,7 +169,10 @@ Delete a task from the plan.
 - `plan_id` (number): Target plan
 - `index` (string): Task index
 
-### Navigation
+</details>
+
+<details>
+<summary>Navigation Tools</summary>
 
 #### `move_to`
 Navigate to a specific task in the plan.
@@ -184,7 +193,10 @@ Get a focused summary of the current planning state.
 **Parameters:**
 - `plan_id` (number): Target plan
 
-### Task Notes
+</details>
+
+<details>
+<summary>Task Notes Tools</summary>
 
 #### `get_task_notes`
 Retrieve notes for a specific task.
@@ -208,7 +220,10 @@ Remove notes from a task.
 - `plan_id` (number): Target plan
 - `index` (string): Task index
 
-### Utility Tools
+</details>
+
+<details>
+<summary>Utility Tools</summary>
 
 #### `change_level`
 Change the abstraction level of a task.
@@ -227,6 +242,8 @@ Generate a coordination lease for task completion.
 
 #### `get_guide`
 Get comprehensive usage guide and help information.
+
+</details>
 
 ## Workflow Examples
 
@@ -308,17 +325,21 @@ AI: Great! You've completed the JWT setup. Let me mark that done:
 - **Use Completion Summaries**: Document what was accomplished when completing tasks
 - **Maintain Context**: Use notes to preserve important decisions and rationale
 
-### Performance Tips
+<details>
+<summary>Performance Tips</summary>
 
 - **Use Leases**: For collaborative environments, use leases to coordinate task completion
 - **Regular Navigation**: Use `move_to` to keep focus on current work
 - **Plan Cleanup**: Remove or archive completed plans to maintain organization
 
-## Troubleshooting
+</details>
 
-### Common Issues
+<details>
+<summary>Troubleshooting</summary>
 
-#### MCP Server Won't Start
+## Common Issues
+
+### MCP Server Won't Start
 
 **Symptoms**: AI assistant can't connect to scatterbrain tools
 
@@ -328,7 +349,7 @@ AI: Great! You've completed the JWT setup. Let me mark that done:
 3. Check AI assistant MCP configuration
 4. Restart AI assistant after configuration changes
 
-#### Tools Not Appearing
+### Tools Not Appearing
 
 **Symptoms**: AI assistant doesn't show scatterbrain tools
 
@@ -338,7 +359,7 @@ AI: Great! You've completed the JWT setup. Let me mark that done:
 3. Verify scatterbrain binary is in PATH
 4. Try with `--example` flag for testing
 
-#### Permission Errors
+### Permission Errors
 
 **Symptoms**: Cannot create or modify plans
 
@@ -347,7 +368,7 @@ AI: Great! You've completed the JWT setup. Let me mark that done:
 2. Run with appropriate user permissions
 3. Verify disk space availability
 
-#### Performance Issues
+### Performance Issues
 
 **Symptoms**: Slow responses from MCP tools
 
@@ -370,9 +391,12 @@ RUST_LOG=debug scatterbrain mcp
 - **CLI Help**: Run `scatterbrain --help` or `scatterbrain mcp --help`
 - **Issue Tracker**: [GitHub Issues](https://github.com/your-username/scatterbrain/issues)
 
-## Advanced Usage
+</details>
 
-### Combined Mode with Web UI
+<details>
+<summary>Advanced Usage</summary>
+
+## Combined Mode with Web UI
 
 Run MCP server with web interface for visual planning:
 
@@ -384,7 +408,7 @@ Access web UI at `http://localhost:8080` while maintaining MCP integration.
 
 *[Screenshot placeholder: Web UI showing hierarchical task structure]*
 
-### Environment Variables
+## Environment Variables
 
 Configure default behavior:
 
@@ -393,7 +417,7 @@ export SCATTERBRAIN_PLAN_ID=1  # Default plan for CLI operations
 export RUST_LOG=info           # Logging level
 ```
 
-### Integration with Development Workflows
+## Integration with Development Workflows
 
 Combine scatterbrain with other development tools:
 
@@ -402,6 +426,8 @@ Combine scatterbrain with other development tools:
 scatterbrain mcp --expose 8080 &
 code .  # Open editor
 ```
+
+</details>
 
 ---
 

@@ -11,9 +11,10 @@ Scatterbrain is designed to help you break down complex problems into manageable
 
 ## 🚀 Quick Start (MCP Server)
 
-### Installation
+<details>
+<summary>Installation Options</summary>
 
-#### Pre-built Binaries (Recommended)
+### Pre-built Binaries (Recommended)
 
 **Shell Script (macOS/Linux):**
 ```bash
@@ -31,7 +32,7 @@ Download pre-built binaries for your platform from the [latest release](https://
 - **Linux**: `scatterbrain-x86_64-unknown-linux-gnu.tar.xz` (x64) or `scatterbrain-aarch64-unknown-linux-gnu.tar.xz` (ARM64)
 - **Windows**: `scatterbrain-x86_64-pc-windows-msvc.zip`
 
-#### Build from Source
+### Build from Source
 
 ```bash
 # Install Rust if you haven't already
@@ -45,6 +46,8 @@ cargo build --release
 # Install globally (optional)
 cargo install --path .
 ```
+
+</details>
 
 ### MCP Server Setup
 
@@ -64,6 +67,16 @@ Once installed, all you need to do is add the following to your Cursor MCP confi
 ```
 
 ![Cursor showing scatterbrain MCP tools](docs/static/cursor_mcp_diagnostic.png)
+
+#### Planning Interface
+
+Scatterbrain's hierarchical planning system helps you break down complex projects into manageable tasks across multiple abstraction levels:
+
+![Initial plan creation with abstraction levels](docs/static/plan_ui_welcome.png)
+
+As you work through your plan, the interface shows your progress and maintains context across all levels:
+
+![Detailed view of an in-progress birthday party plan](docs/static/plan_ui_details.png)
 
 ## ✨ Features
 
@@ -87,9 +100,10 @@ Once installed, all you need to do is add the following to your Cursor MCP confi
 - Shell completions for bash, zsh, fish
 - Environment variable support for workflow integration
 
-## 📋 Usage Modes
+<details>
+<summary>Usage Modes</summary>
 
-### MCP Server (Recommended)
+## MCP Server (Recommended)
 Perfect for AI-assisted development and planning:
 ```bash
 scatterbrain mcp --expose 8080
@@ -98,7 +112,7 @@ scatterbrain mcp --expose 8080
 - Optional web UI access
 - Ideal for collaborative AI workflows
 
-### CLI Usage
+## CLI Usage
 Direct command-line interaction:
 ```bash
 # Create a plan
@@ -110,7 +124,7 @@ scatterbrain task add --level 0 "Design architecture" --notes "High-level planni
 scatterbrain move 0
 ```
 
-### HTTP API Server
+## HTTP API Server
 Standalone web server:
 ```bash
 scatterbrain serve --port 3000
@@ -119,7 +133,7 @@ scatterbrain serve --port 3000
 - Web UI at http://localhost:3000
 - Programmatic integration
 
-### Combined Mode
+## Combined Mode
 Best of all worlds:
 ```bash
 scatterbrain mcp --expose 8080
@@ -128,13 +142,18 @@ scatterbrain mcp --expose 8080
 - Web UI for visual management
 - CLI access for scripting
 
-## 📚 Documentation
+</details>
+
+<details>
+<summary>Documentation</summary>
 
 - **[MCP Integration Guide](docs/MCP-GUIDE.md)** - Complete guide to using scatterbrain with AI assistants
 - **[CLI Reference](docs/CLI-REFERENCE.md)** - Comprehensive command documentation
 - **[Web UI Guide](docs/WEB-UI.md)** - Browser interface walkthrough
 - **[Examples & Patterns](docs/EXAMPLES.md)** - Real-world usage scenarios
 - **[Architecture Overview](docs/ARCHITECTURE.md)** - System design and concepts
+
+</details>
 
 ## 🎯 Core Concepts
 
@@ -158,55 +177,17 @@ When running as an MCP server, scatterbrain provides these tools to AI assistant
 - `get_distilled_context` - Get focused planning context
 - And 10 more specialized tools for comprehensive task management
 
-## 🚀 Release Process (Maintainers)
-
-Scatterbrain uses automated releases powered by [cargo-dist](https://opensource.axo.dev/cargo-dist/). To create a new release:
-
-1. **Update version** in `Cargo.toml`
-2. **Commit changes** and push to main branch
-3. **Create and push a git tag**:
-   ```bash
-   git tag v0.2.0
-   git push origin v0.2.0
-   ```
-4. **GitHub Actions automatically**:
-   - Builds binaries for all supported platforms
-   - Creates installers (shell script and PowerShell)
-   - Generates checksums and release notes
-   - Publishes GitHub release with all assets
-
-**Supported Platforms:**
-- macOS (Apple Silicon and Intel)
-- Linux (x64 and ARM64)
-- Windows (x64)
-
-## 🤝 Contributing
-
-We welcome contributions! Please see our [Contributing Guide](CONTRIBUTING.md) for details.
-
-### Development Setup
-
-```bash
-git clone https://github.com/owen-d/scatterbrain.git
-cd scatterbrain
-cargo build
-cargo test
-```
-
-### Running Tests
-
-```bash
-make test
-```
-
 ## 📄 License
 
 This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
 
-## 🔗 Links
+<details>
+<summary>Links & Resources</summary>
 
 - [GitHub Repository](https://github.com/owen-d/scatterbrain)
 - [Latest Release](https://github.com/owen-d/scatterbrain/releases/latest)
 - [Issue Tracker](https://github.com/owen-d/scatterbrain/issues)
 - [Model Context Protocol](https://modelcontextprotocol.io/)
 - [Cursor Editor](https://cursor.sh/)
+
+</details>
