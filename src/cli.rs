@@ -200,11 +200,6 @@ enum PlanCommands {
     },
     /// List all available plan IDs
     List,
-    /// Set the active plan ID (EXPERIMENTAL - might use env var instead)
-    Set {
-        /// The ID (0-255) to set as active
-        id: u8,
-    },
     /// Show the details of the current plan (tasks, levels)
     Show,
 }
@@ -678,12 +673,6 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
                         }
                         Err(e) => tracing::error!("Error listing plans: {e}"),
                     }
-                    Ok(())
-                }
-                PlanCommands::Set { id } => {
-                    println!("To set the active plan, use your shell's command:");
-                    println!("  export {PLAN_ID_ENV_VAR}={id}");
-                    println!("Note: This only affects the current shell session.");
                     Ok(())
                 }
                 PlanCommands::Show => {

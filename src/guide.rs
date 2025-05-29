@@ -160,7 +160,6 @@ PLAN MANAGEMENT (scatterbrain plan ...):
   $ scatterbrain plan create "<prompt>" [--notes <TEXT>] Create a new plan. Use a short prompt/title and add details via --notes. Prints ID and guide.
   $ scatterbrain plan delete <id>                        Delete a plan by its ID
   $ scatterbrain plan list                               List available plan IDs
-  $ scatterbrain plan set <id>                           (Info only) Shows how to set the environment variable
   $ scatterbrain plan show                               View the full plan with all tasks
 
 TASK MANAGEMENT (scatterbrain task ...):
