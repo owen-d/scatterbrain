@@ -3,7 +3,9 @@
     "scatterbrain": {
       "command": "scatterbrain",
       "args": [
-        "mcp"
+        "mcp",
+        "--expose",
+        "3099"
       ],
       "env": {}
     }
