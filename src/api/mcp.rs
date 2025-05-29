@@ -37,17 +37,16 @@ fn to_mcp_result<T: serde::Serialize>(
 ) -> Result<CallToolResult, McpError> {
     match result {
         Ok(value) => {
-            let json = serde_json::to_value(value).map_err(|e| {
-                McpError::internal_error(format!("Serialization error: {}", e), None)
-            })?;
+            let json = serde_json::to_value(value)
+                .map_err(|e| McpError::internal_error(format!("Serialization error: {e}"), None))?;
             Ok(CallToolResult::success(vec![Content::text(
                 serde_json::to_string_pretty(&json).map_err(|e| {
-                    McpError::internal_error(format!("JSON formatting error: {}", e), None)
+                    McpError::internal_error(format!("JSON formatting error: {e}"), None)
                 })?,
             )]))
         }
         Err(e) => Err(McpError::internal_error(
-            format!("Scatterbrain error: {}", e),
+            format!("Scatterbrain error: {e}"),
             None,
         )),
     }
@@ -56,7 +55,7 @@ fn to_mcp_result<T: serde::Serialize>(
 /// Helper function to parse index from string
 fn parse_index(index_str: &str) -> Result<Index, McpError> {
     models::parse_index(index_str).map_err(|e| {
-        McpError::invalid_params(format!("Invalid index format '{}': {}", index_str, e), None)
+        McpError::invalid_params(format!("Invalid index format '{index_str}': {e}"), None)
     })
 }
 
@@ -248,6 +247,12 @@ impl ScatterbrainMcpServer {
         let result = self.client.delete_task_notes(plan_id, parsed_index).await;
         to_mcp_result(result)
     }
+
+    #[tool(description = "Get comprehensive guide on using Scatterbrain through MCP")]
+    async fn get_guide(&self) -> Result<CallToolResult, McpError> {
+        let guide_content = crate::guide::get_guide_string(crate::guide::GuideMode::Mcp);
+        Ok(CallToolResult::success(vec![Content::text(guide_content)]))
+    }
 }
 
 // Implement ServerHandler for the MCP server
@@ -264,7 +269,8 @@ impl rmcp::ServerHandler for ScatterbrainMcpServer {
             instructions: Some(
                 "Scatterbrain MCP Server - Hierarchical planning and task management through MCP.\n\
                  Provides tools for plan management, task operations, navigation, and notes management.\n\
-                 Use plan_id to specify which plan to work with, and index format like '0,1,2' for task navigation."
+                 Use plan_id to specify which plan to work with, and index format like '0,1,2' for task navigation.\n\
+                 Start with the `get_guide()` tool to get started."
                     .into(),
             ),
         }

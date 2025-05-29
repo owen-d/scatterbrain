@@ -7,6 +7,7 @@
 // Declare public modules
 pub mod api;
 pub mod cli;
+pub mod guide;
 pub mod levels;
 pub mod models;
 

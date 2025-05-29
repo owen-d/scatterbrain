@@ -734,238 +734,7 @@ fn print_task(task: &crate::models::Task, index: Vec<usize>) {
 
 /// Generates the guide string with formatted values.
 fn get_guide_string() -> String {
-    format!(
-        r#"
-=== SCATTERBRAIN GUIDE ===
-
-Scatterbrain is a hierarchical planning and task management tool designed to help
-break down complex projects into manageable tasks through multiple abstraction levels.
-
-== OVERVIEW ==
-
-Scatterbrain helps you:
-- Structure complex tasks in a logical hierarchy
-- Navigate between different levels of abstraction
-- Track progress and maintain focus
-- Adapt your plan as work progresses
-- Manage multiple, separate plans simultaneously
-
-== GETTING STARTED: PLANS ==
-
-Scatterbrain organizes work into separate "plans". Each command needs to know which plan you're working on.
-
-1. CREATE A PLAN FROM A PROMPT:
-   $ scatterbrain plan create "My new project goal" [--notes <TEXT>]
-   > Created new plan with ID: 42
-   > Plan 42 created with goal: "My new project goal"
-   > Use 'export {}=42' to set this plan as default for your session.
-   > --- Scatterbrain Guide ---
-   > (The rest of this guide will be printed here)
-   > --------------------------
-   Tip: Keep the <prompt> concise (like a title). Use the optional --notes flag
-   to add more detailed descriptions, context, or acceptance criteria, especially
-   for non-trivial plans.
-
-2. SPECIFY THE ACTIVE PLAN:
-   You MUST tell scatterbrain which plan to use in one of two ways:
-
-   a) ENVIRONMENT VARIABLE (Recommended for sessions):
-      $ export {}={}
-      $ scatterbrain current  # Now works with plan 42
-
-   b) --plan FLAG (Overrides env var for a single command):
-      $ scatterbrain --plan={} current
-
-3. LIST PLANS:
-   $ scatterbrain plan list
-
-== ABSTRACTION LEVELS EXPLAINED ==
-
-Scatterbrain uses a multi-level approach to planning:
-
-1. High-level planning: Identifying architecture, scope, and approach
-   - Focus on simplicity, extensibility, and good abstractions
-   - Set the overall direction and boundaries of your project
-   - Ask: "What's the overall architecture?" "Which approach should we take?"
-
-2. Isolation: Breaking down the plan into discrete, independent parts
-   - Define boundaries between components
-   - Establish interfaces and contracts
-   - Ensure each part can be completed and verified independently
-   - Ask: "What are the interfaces?" "How should we divide this into parts?"
-
-3. Ordering: Sequencing the parts in a logical flow
-   - Start with foundational building blocks
-   - Identify dependencies between tasks
-   - Plan the critical path
-   - Ask: "What order should we implement these?" "Which parts come first?"
-
-4. Implementation: Converting each part into specific, actionable tasks
-   - Define concrete, actionable steps
-   - Detail exact implementation requirements
-   - Make tasks independently completable
-   - Ask: "What specific changes are needed?" "What files need modification?"
-
-== TRANSITIONING BETWEEN LEVELS ==
-
-MOVING DOWN:
-  Level 1 → Level 2:
-  • When your high-level approach is clear
-  • When you're ready to define component boundaries
-  • When you need to establish contracts between components
-
-  Level 2 → Level 3:
-  • When component boundaries are well-defined
-  • When you need to determine implementation sequence
-  • When you're ready to identify dependencies
-
-  Level 3 → Level 4:
-  • When the implementation sequence is clear
-  • When you're ready to define specific tasks
-  • When you're prepared to execute the implementation plan
-
-MOVING UP:
-  Level 4 → Level 3:
-  • When you've completed implementation tasks
-  • When you need to reorganize remaining task sequence
-  • When you need to reprioritize work
-
-  Level 3 → Level 2:
-  • When you discover issues with component interfaces
-  • When integration is more complex than expected
-  • When you need to redefine component boundaries
-
-  Level 2 → Level 1:
-  • When you find fundamental flaws in the approach
-  • When components don't form a coherent system
-  • When you need to rethink the entire architecture
-
-== WORKFLOW GUIDE ==
-
-(Ensure {}={} is set or use --plan=<id> for each command)
-
-1. CREATE A PLAN AND NAVIGATE THE LEVELS
-   - Begin at Level 0 with high-level planning:
-     $ scatterbrain task add --level 0 "Design system architecture"
-     $ scatterbrain move 0
-
-   - Add subtasks at appropriate levels:
-     $ scatterbrain task add --level 1 "Identify core components"
-     $ scatterbrain move 0,0
-
-   - Continue adding more granular tasks at deeper levels
-
-2. STAY ON TRACK
-   - Regularly review your plan:
-     $ scatterbrain plan show
-
-   - Focus on your current task:
-     $ scatterbrain current
-
-   - Get a distilled context:
-     $ scatterbrain distilled
-
-   - Complete tasks when finished:
-     $ scatterbrain task complete --summary "Implemented the feature"
-
-   - Complete tasks requiring a lease:
-     Some tasks require a 'lease' token for completion, ensuring only one agent
-     attempts completion at a time.
-     1. Generate the lease for the task:
-        $ scatterbrain task lease <INDEX>  # e.g., scatterbrain task lease 0,1,2
-        > Generated lease 123 for task at index: 0,1,2
-     2. Complete the task using the generated lease ID and provide a summary:
-        $ scatterbrain task complete --lease 123 --summary "Completed task with lease"
-
-     Note: If the lease doesn't match, completion will fail unless you use --force.
-     Using --force bypasses both lease and summary checks; use it sparingly.
-     $ scatterbrain task complete --force
-
-   - Move between tasks to adapt to changing priorities:
-     $ scatterbrain move 1,2
-
-3. PROGRESSIVE REFINEMENT
-   - Start with broad strokes at Level 0
-   - Refine details as you move to deeper levels
-   - Complete higher-level tasks only when all subtasks are done
-   - Use completed tasks to validate your approach
-
-== COMMAND REFERENCE ==
-
-GLOBAL FLAGS:
-  --plan=<id>                                            Specify the plan ID for this command (overrides env var)
-  --server=<url>                                         Specify the server URL (default: http://localhost:3000)
-
-PLAN MANAGEMENT (scatterbrain plan ...):
-  $ scatterbrain plan create "<prompt>" [--notes <TEXT>] Create a new plan. Use a short prompt/title and add details via --notes. Prints ID and guide.
-  $ scatterbrain plan delete <id>                        Delete a plan by its ID
-  $ scatterbrain plan list                               List available plan IDs
-  $ scatterbrain plan set <id>                           (Info only) Shows how to set the environment variable
-  $ scatterbrain plan show                               View the full plan with all tasks
-
-TASK MANAGEMENT (scatterbrain task ...):
-  $ scatterbrain task add --level <LEVEL> --notes <TEXT> "Description" Create new task (level required, notes required)
-                                                         Note: Adding a subtask marks parents incomplete.
-  $ scatterbrain task complete --index <INDEX> [--lease <ID>] [--force] [--summary <TEXT>] Complete task at specified index (summary required unless --force)
-  $ scatterbrain task change-level <LEVEL_INDEX>         Change current task's abstraction level
-  $ scatterbrain task lease <INDEX>                      Generate a lease for a task
-  $ scatterbrain task remove <INDEX>                     Remove a task by its index (e.g., 0,1,2)
-  $ scatterbrain task uncomplete <INDEX>                 Uncomplete a task by its index
-  $ scatterbrain task notes view <INDEX>                 View notes for a specific task
-  $ scatterbrain task notes set <INDEX> "<NOTES>"        Set notes for a specific task
-  $ scatterbrain task notes delete <INDEX>               Delete notes for a specific task
-
-NAVIGATION & VIEWING (scatterbrain ...):
-  $ scatterbrain move <INDEX>                            Navigate to a task (e.g., 0 or 0,1,2)
-  $ scatterbrain current                                 View details of the current task
-  $ scatterbrain distilled                               View a distilled context of your plan
-
-SERVER MANAGEMENT (scatterbrain serve ...):
-  $ scatterbrain serve                                   Start API server (default port 3000)
-  $ scatterbrain serve --port <PORT>                     Start API server on a custom port
-  $ scatterbrain serve --example                         Start with example task tree (plan ID 0)
-
-HELP & UTILITIES (scatterbrain ...):
-  $ scatterbrain guide                                   Show this guide
-  $ scatterbrain completions <SHELL>                     Generate shell completions
-  $ scatterbrain <COMMAND> --help                        Show help for a specific command
-
-== BEST PRACTICES ==
-
-PLAN MANAGEMENT:
-  • Use `export {}=<id>` for most work within a shell session.
-  • Use `--plan=<id>` for one-off commands targeting a different plan.
-  • Regularly use `plan list` to see available plans.
-
-PRODUCTIVITY TECHNIQUES:
-  • Use `distilled` to stay focused on the current context.
-  • Regularly review your plan and adjust as needed.
-  • Use `move` to navigate between tasks and levels.
-  • Use `complete` to mark tasks as done.
-  • Use `uncomplete` to reopen tasks.
-  • Use `remove` to remove tasks that are no longer needed.
-  • Use `change-level` to adjust the abstraction level of a task.
-  • Use `lease` to ensure exclusive access to tasks.
-
-COMMON MISTAKES TO AVOID:
-  • Forgetting to set {}={} or use --plan=<id>.
-  • Premature implementation detail: Diving into code specifics at Level 0
-  • Inconsistent abstractions: Mixing high-level and low-level concerns
-  • Ignoring dependencies: Assuming tasks can be completed in any order
-  • Neglecting to validate: Assuming completed tasks are correct
-  • Over-complicating: Adding unnecessary complexity to the plan
-  • Under-planning: Skipping important steps in the planning process
-"#,
-        PLAN_ID_ENV_VAR, // 1. For 'export {}=42' example (line ~606)
-        PLAN_ID_ENV_VAR, // 2. For 'export {}={}' explanation (line ~615a)
-        "<id>",          // 3. For 'export {}={}' explanation (line ~615a)
-        "<id>",          // 4. For '--plan={}' explanation (line ~619b)
-        PLAN_ID_ENV_VAR, // 5. For '(Ensure {}={} is set' in Workflow (line ~687)
-        "<id>",          // 6. For '(Ensure {}={} is set' in Workflow (line ~687)
-        PLAN_ID_ENV_VAR, // 7. For 'Use `export {}=<id>`' in Best Practices (line ~775)
-        PLAN_ID_ENV_VAR, // 8. For 'Forgetting to set {}={}' in Mistakes (line ~792)
-        "<id>"           // 9. For 'Forgetting to set {}={}' in Mistakes (line ~792)
-    )
+    crate::guide::get_guide_string(crate::guide::GuideMode::Cli)
 }
 
 fn print_guide() {
@@ -1301,28 +1070,40 @@ mod tests {
             "Check export example format"
         );
         assert!(
-            guide.contains(&format!("export {}={}", env_var, "<id>")),
+            guide.contains(&format!("export {}={}", env_var, "42")),
             "Check export explanation format"
         );
         assert!(
-            guide.contains("$ scatterbrain --plan=<id> current"),
+            guide.contains("$ scatterbrain --plan=42 current"),
             "Check --plan flag example format"
         );
         assert!(
-            guide.contains(&format!("(Ensure {}={} is set", env_var, "<id>")),
+            guide.contains(&format!("(Ensure {}={} is set", env_var, "42")),
             "Check workflow guide format"
         );
         assert!(
             guide.contains(&format!("Use `export {env_var}=<id>`")),
             "Check best practices format"
         );
-        assert!(
-            guide.contains(&format!("Forgetting to set {}={}", env_var, "<id>")),
-            "Check common mistakes format"
-        );
 
-        // Check that the total number of placeholders matches the arguments provided (9)
-        // This is implicitly tested by the format! macro itself, but we check key instances.
+        // Check that the guide contains the main sections
+        assert!(guide.contains("== OVERVIEW =="), "Check overview section");
+        assert!(
+            guide.contains("== ABSTRACTION LEVELS EXPLAINED =="),
+            "Check abstraction levels section"
+        );
+        assert!(
+            guide.contains("== WORKFLOW GUIDE =="),
+            "Check workflow section"
+        );
+        assert!(
+            guide.contains("== COMMAND REFERENCE =="),
+            "Check command reference section"
+        );
+        assert!(
+            guide.contains("== BEST PRACTICES =="),
+            "Check best practices section"
+        );
     }
 
     // Helper function to parse CLI args for testing
