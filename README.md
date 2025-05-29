@@ -1,9 +1,10 @@
-# Scatterbrain
+# Scatterbrain: _Stop babysitting your AI_
 
 **A hierarchical planning and task management tool with powerful MCP server integration for AI assistants**
 
-[![Build Status](https://img.shields.io/badge/build-passing-brightgreen)](https://github.com/your-username/scatterbrain)
-[![Version](https://img.shields.io/badge/version-0.1.0-blue)](https://github.com/your-username/scatterbrain)
+[![Build Status](https://img.shields.io/badge/build-passing-brightgreen)](https://github.com/owen-d/scatterbrain)
+[![Release](https://img.shields.io/github/v/release/owen-d/scatterbrain)](https://github.com/owen-d/scatterbrain/releases/latest)
+[![Version](https://img.shields.io/badge/version-0.1.0-blue)](https://github.com/owen-d/scatterbrain)
 [![License](https://img.shields.io/badge/license-MIT-green)](LICENSE)
 
 Scatterbrain is designed to help you break down complex problems into manageable, hierarchical tasks. Its primary strength lies in its **Model Context Protocol (MCP) server**, which seamlessly integrates with AI assistants like Claude and Cursor, enabling intelligent task management and planning workflows.
@@ -12,12 +13,32 @@ Scatterbrain is designed to help you break down complex problems into manageable
 
 ### Installation
 
+#### Pre-built Binaries (Recommended)
+
+**Shell Script (macOS/Linux):**
+```bash
+curl --proto '=https' --tlsv1.2 -LsSf https://github.com/owen-d/scatterbrain/releases/latest/download/scatterbrain-installer.sh | sh
+```
+
+**PowerShell (Windows):**
+```powershell
+powershell -ExecutionPolicy Bypass -c "irm https://github.com/owen-d/scatterbrain/releases/latest/download/scatterbrain-installer.ps1 | iex"
+```
+
+**Direct Download:**
+Download pre-built binaries for your platform from the [latest release](https://github.com/owen-d/scatterbrain/releases/latest):
+- **macOS**: `scatterbrain-aarch64-apple-darwin.tar.xz` (Apple Silicon) or `scatterbrain-x86_64-apple-darwin.tar.xz` (Intel)
+- **Linux**: `scatterbrain-x86_64-unknown-linux-gnu.tar.xz` (x64) or `scatterbrain-aarch64-unknown-linux-gnu.tar.xz` (ARM64)
+- **Windows**: `scatterbrain-x86_64-pc-windows-msvc.zip`
+
+#### Build from Source
+
 ```bash
 # Install Rust if you haven't already
 curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
 
 # Clone and build scatterbrain
-git clone https://github.com/your-username/scatterbrain.git
+git clone https://github.com/owen-d/scatterbrain.git
 cd scatterbrain
 cargo build --release
 
@@ -153,6 +174,28 @@ When running as an MCP server, scatterbrain provides these tools to AI assistant
 - `get_distilled_context` - Get focused planning context
 - And 10 more specialized tools for comprehensive task management
 
+## 🚀 Release Process (Maintainers)
+
+Scatterbrain uses automated releases powered by [cargo-dist](https://opensource.axo.dev/cargo-dist/). To create a new release:
+
+1. **Update version** in `Cargo.toml`
+2. **Commit changes** and push to main branch
+3. **Create and push a git tag**:
+   ```bash
+   git tag v0.2.0
+   git push origin v0.2.0
+   ```
+4. **GitHub Actions automatically**:
+   - Builds binaries for all supported platforms
+   - Creates installers (shell script and PowerShell)
+   - Generates checksums and release notes
+   - Publishes GitHub release with all assets
+
+**Supported Platforms:**
+- macOS (Apple Silicon and Intel)
+- Linux (x64 and ARM64)
+- Windows (x64)
+
 ## 🤝 Contributing
 
 We welcome contributions! Please see our [Contributing Guide](CONTRIBUTING.md) for details.
@@ -160,7 +203,7 @@ We welcome contributions! Please see our [Contributing Guide](CONTRIBUTING.md) f
 ### Development Setup
 
 ```bash
-git clone https://github.com/your-username/scatterbrain.git
+git clone https://github.com/owen-d/scatterbrain.git
 cd scatterbrain
 cargo build
 cargo test
@@ -178,11 +221,8 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 
 ## 🔗 Links
 
-- [GitHub Repository](https://github.com/your-username/scatterbrain)
-- [Issue Tracker](https://github.com/your-username/scatterbrain/issues)
+- [GitHub Repository](https://github.com/owen-d/scatterbrain)
+- [Latest Release](https://github.com/owen-d/scatterbrain/releases/latest)
+- [Issue Tracker](https://github.com/owen-d/scatterbrain/issues)
 - [Model Context Protocol](https://modelcontextprotocol.io/)
 - [Cursor Editor](https://cursor.sh/)
-
----
-
-**Want to stop babysitting your AI?** Start with the [MCP Integration Guide](docs/MCP-GUIDE.md) and see how scatterbrain transforms complex project management into an intelligent, collaborative process. 

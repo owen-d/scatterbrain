@@ -3,6 +3,7 @@ name = "scatterbrain"
 version = "0.1.0"
 edition = "2021"
 default-run = "scatterbrain"
+repository = "https://github.com/owen-d/scatterbrain"
 
 [dependencies]
 serde = { version = "1.0", features = ["derive"] }
@@ -47,3 +48,29 @@ pretty_assertions = "1.4.0"
 tower = { version = "0.4", features = ["util"] }
 http-body-util = "0.1"
 html-escape = "0.2"
+
+# The profile that 'dist' will build with
+[profile.dist]
+inherits = "release"
+lto = "thin"
+
+# cargo-dist configuration
+[workspace.metadata.dist]
+# The preferred cargo-dist version to use in CI (Cargo.toml SemVer syntax)
+cargo-dist-version = "0.28.0"
+# CI backends to support
+ci = "github"
+# The installers to generate for each app
+installers = ["shell", "powershell"]
+# Target platforms to build apps for (Rust target-triple syntax)
+targets = [
+  "aarch64-apple-darwin",
+  "x86_64-apple-darwin",
+  "x86_64-unknown-linux-gnu",
+  "aarch64-unknown-linux-gnu",
+  "x86_64-pc-windows-msvc",
+]
+# Publish jobs to run in CI
+pr-run-mode = "plan"
+# Whether to install an updater program
+install-updater = false
