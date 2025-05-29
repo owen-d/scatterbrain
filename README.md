@@ -7,7 +7,7 @@
 [![Version](https://img.shields.io/badge/version-0.1.0-blue)](https://github.com/owen-d/scatterbrain)
 [![License](https://img.shields.io/badge/license-MIT-green)](LICENSE)
 
-Scatterbrain is designed to help you break down complex problems into manageable, hierarchical tasks. Its primary strength lies in its **Model Context Protocol (MCP) server**, which seamlessly integrates with AI assistants like Claude and Cursor, enabling intelligent task management and planning workflows.
+Scatterbrain keeps an AI Agent on task, so you don't have to. It does this by treating the AI to act as a planner and implementer, in alternating fashion. This helps the AI break down complex problems into manageable, hierarchical tasks and more importantly, keeps it on track. Its primary strength lies in its **Model Context Protocol (MCP) server**, which seamlessly integrates with AI assistants like Claude and Cursor, enabling intelligent task management and planning workflows.
 
 ## 🚀 Quick Start (MCP Server)
 
