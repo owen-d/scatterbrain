@@ -13,6 +13,10 @@ Scatterbrain keeps an AI Agent on task, so you don't have to. It does this by tr
 
 
 
+https://github.com/user-attachments/assets/b233e8b3-44bb-4c46-b5a4-6db7212fc088
+
+
+
 ## 🚀 Quick Start (MCP Server)
 
 <details>
