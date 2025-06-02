@@ -9,6 +9,10 @@
 
 Scatterbrain keeps an AI Agent on task, so you don't have to. It does this by treating the AI to act as a planner and implementer, in alternating fashion. This helps the AI break down complex problems into manageable, hierarchical tasks and more importantly, keeps it on track. Its primary strength lies in its **Model Context Protocol (MCP) server**, which seamlessly integrates with AI assistants like Claude and Cursor, enabling intelligent task management and planning workflows.
 
+## 🎬 Demo
+
+
+
 ## 🚀 Quick Start (MCP Server)
 
 <details>
