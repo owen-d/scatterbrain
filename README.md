@@ -61,14 +61,19 @@ cargo install --path .
 
 #### For Cursor
 
-Once installed, all you need to do is add the following to your Cursor MCP configuration:
+Once installed, all you need to do is add the following to your Cursor MCP configuration (expose is optional, but allows you to follow progress via the web interface):
 
 ```json
 {
   "mcpServers": {
     "scatterbrain": {
       "command": "scatterbrain",
-      "args": ["mcp"]
+      "args": [
+        "mcp",
+        "--expose",
+        "3099"
+      ],
+      "env": {}
     }
   }
 }
